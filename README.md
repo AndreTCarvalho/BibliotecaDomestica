@@ -15,7 +15,6 @@ Um sistema para catalogar e gerenciar sua biblioteca pessoal utilizando Google G
 O **Biblioteca Doméstica** é uma aplicação Web com um CRUD básico que permite adicionar, editar, buscar e excluir livros de uma lista.
 O diferencial da é a utilização do Gemini Google para simplificar o processo de cadastro através do processamento de imagens.
 
-
 ![image](https://github.com/user-attachments/assets/3b08f460-ae6a-4f9d-9bf5-f07cd2a36400)
 
 
@@ -23,7 +22,7 @@ O diferencial da é a utilização do Gemini Google para simplificar o processo 
 
 Duas abordagens de IA foram implementadas. 
 
-A primeira utilizou apenas um Cliente da API Google GenAI, retornando todas as informações solicitadas: Título do Livro, Autor, Idioma e Resenha.
+A primeira abordagem, implementada em **app.py**, utilizou apenas um Cliente da API Google GenAI, retornando todas as informações solicitadas: Título do Livro, Autor, Idioma e Resenha.
 
 ![image](https://github.com/user-attachments/assets/b3de9912-39b6-47a9-b6b6-ee04a411cd02)
 
@@ -39,26 +38,16 @@ Instruções para executar o projeto localmente:
 
 1.  **Clone o repositório:**
 
-    ```bash
-    git clone [https://github.com/seu-usuario/biblioteca-domestica.git](https://github.com/seu-usuario/biblioteca-domestica.git)
-    ```
-
-2.  **Navegue até o diretório do projeto:**
-
-    ```bash
-    cd biblioteca-domestica
-    ```
-
 3.  **Instale as dependências:**
 
     ```bash
     npm install  # Ou yarn install
     ```
-5.  **Inicie o servidor:**
+5.  **Escolha a Aplicação e Execute o código em Python**
 
-    ```bash
-    npm start # Ou yarn start
-    ```
+* Para utilização de um IA com um Cliente da API GenAI: execute python **app;py**;
+
+* Para utilização de Agentes com a API : execute python **app_agents.py**;
 
 6.  **Abra no navegador:** Acesse `http://localhost:5000`.
 
@@ -66,10 +55,11 @@ Instruções para executar o projeto localmente:
 
 ### 👷‍♂️ Sobre o Projeto
 
-Este projeto teve como objetivo colocar em prática os conceitos aprendidos na II Imersão Alura de IA com Gemini Google.
+Este projeto teve como objetivo colocar em prática os conceitos aprendidos sobre Gemini Google na Imersão de IA promovida pela Alura de 12 a 16 de maio de 2025.
 
-O tra
+** TODO O CÓDIGO DA APLICAÇÂO FOI GERADO POR UM ÚNICO PROMPT !!! **
 
+Trata-se de um protótipo. Por esse motivo, a persistência do dados foi feita em um arquivo JSON, e não em um banco de dados. Colaborações são bem vindas.
 
 ### 📄 Licença
 
