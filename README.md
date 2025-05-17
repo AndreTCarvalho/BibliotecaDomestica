@@ -1,6 +1,11 @@
 # 📚 Biblioteca Doméstica
 
-Um sistema para catalogar e gerenciar sua biblioteca pessoal utilizando Google Gemini.
+Um sistema para catalogar e gerenciar sua biblioteca pessoal utilizando **Google Gemini**.
+
+O próprio código em Python, HTML, JS e CSS foi gerado 100% pelo **Google Gemini** (em um único prompt!).
+
+![image](https://github.com/user-attachments/assets/894b4bad-2427-4d8a-b05d-15354c1e8277)
+
 
 ### ✨ Motivação
 
@@ -15,7 +20,12 @@ Um sistema para catalogar e gerenciar sua biblioteca pessoal utilizando Google G
 O **Biblioteca Doméstica** é uma aplicação Web com um CRUD básico que permite adicionar, editar, buscar e excluir livros de uma lista.
 O diferencial da é a utilização do Gemini Google para simplificar o processo de cadastro através do processamento de imagens.
 
-![image](https://github.com/user-attachments/assets/3b08f460-ae6a-4f9d-9bf5-f07cd2a36400)
+![image](https://github.com/user-attachments/assets/8e90c06a-5d82-4329-8c7b-ed4f2ac66e83)
+
+
+![image](https://github.com/user-attachments/assets/37b0cf40-eb2c-4d67-bd06-49791d1ba020)
+
+
 
 
 ### 🤖 Inteligência Artificial Integrada
@@ -24,7 +34,8 @@ Duas abordagens de IA foram implementadas.
 
 A primeira abordagem, implementada em **app.py**, utilizou apenas um Cliente da API Google GenAI, retornando todas as informações solicitadas: Título do Livro, Autor, Idioma e Resenha.
 
-![image](https://github.com/user-attachments/assets/b3de9912-39b6-47a9-b6b6-ee04a411cd02)
+![image](https://github.com/user-attachments/assets/08e3023d-2d55-4952-8b7d-61f7bcf780c0)
+
 
 
 A segunda abordagem explorou o conceito de Agentes de IA, implementando a estrutura ilustrada abaixo.
