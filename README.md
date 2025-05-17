@@ -4,11 +4,11 @@ Um sistema para catalogar e gerenciar sua biblioteca pessoal utilizando Google G
 
 ### ✨ Motivação
 
-**A Oportunidade:** Quem é apaixonado por livros quer ter sua biblioteca pessoal organizada.
+**Oportunidade:** Quem é apaixonado por livros quer ter sua biblioteca pessoal organizada.
 
-**O Problema:** Aplicativos e softwares disponíveis para isso requerem o cadastro manual dos livros, ou propõem quando muito sistemas ineficientes de busca das informações pelo código ISBN.
+**Problema:** Aplicativos e softwares disponíveis para isso requerem o cadastro manual dos livros, ou propõem quando muito sistemas ineficientes de busca das informações pelo código ISBN.
 
-**A Solução:** Criar um aplicativo Web, pensado para ser usado no celular, que obtém as informações a partir de fotos tiradas dos livros.  Para isso, utilizamos a **IA** do Google Gemini para tornar essa tarefa mais eficiente.
+**Solução:** Criar um aplicativo Web, pensado para ser usado no celular, que **obtém as informações a partir de fotos tiradas dos livros**.  Para isso, utilizamos a **IA** do Google Gemini para tornar essa tarefa mais eficiente.
 
 ### ⚙️ Como Funciona
 
@@ -45,9 +45,9 @@ Instruções para executar o projeto localmente:
     ```
 5.  **Escolha a Aplicação e Execute o código em Python**
 
-* Para utilização de um IA com um Cliente da API GenAI: execute python **app;py**;
+    * Para utilização de um IA com um Cliente da API GenAI: execute python **app;py**;
 
-* Para utilização de Agentes com a API : execute python **app_agents.py**;
+    * Para utilização de Agentes com a API : execute python **app_agents.py**;
 
 6.  **Abra no navegador:** Acesse `http://localhost:5000`.
 
@@ -57,13 +57,13 @@ Instruções para executar o projeto localmente:
 
 Este projeto teve como objetivo colocar em prática os conceitos aprendidos sobre Gemini Google na Imersão de IA promovida pela Alura de 12 a 16 de maio de 2025.
 
-** TODO O CÓDIGO DA APLICAÇÂO FOI GERADO POR UM ÚNICO PROMPT !!! **
+   **OBS: TODO O CÓDIGO DESTA APLICAÇÂO FOI GERADO PELO GEMINI EM UM ÚNICO PROMPT!!! Confira a documentação.**
 
 Trata-se de um protótipo. Por esse motivo, a persistência do dados foi feita em um arquivo JSON, e não em um banco de dados. Colaborações são bem vindas.
 
 ### 📄 Licença
 
-Distribuído sob a Licença GNU.
+Distribuído sob a Licença GNU 3.0.
 
 ### ✉️ Contato
 
