@@ -6,9 +6,9 @@ Um sistema para catalogar e gerenciar sua biblioteca pessoal utilizando Google G
 
 **Oportunidade:** Quem é apaixonado por livros quer ter sua biblioteca pessoal organizada.
 
-**Problema:** Aplicativos e softwares disponíveis para isso requerem o cadastro manual dos livros, ou propõem quando muito sistemas ineficientes de busca das informações pelo código ISBN.
+**Problema:** Aplicativos e softwares disponíveis para isso requerem o cadastro manual dos livros, ou disponibilizam, quando muito, ferramentas ineficientes de busca das informações pelo código ISBN.
 
-**Solução:** Criar um aplicativo Web, pensado para ser usado no celular, que **obtém as informações a partir de fotos tiradas dos livros**.  Para isso, utilizamos a **IA** do Google Gemini para tornar essa tarefa mais eficiente.
+**Solução:** Aplicativo Web, pensado para ser usado no celular, que **obtém as informações a partir de fotos tiradas dos livros**.  Para isso, utilizamos a **IA** do Google Gemini para tornar essa tarefa mais eficiente.
 
 ### ⚙️ Como Funciona
 
