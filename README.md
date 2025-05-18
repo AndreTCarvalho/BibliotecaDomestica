@@ -55,7 +55,10 @@ Instruções para executar o projeto localmente:
 3.  **Instale as dependências:**
 
     ```bash
-    %pip -q install google-genai
+    pip -q install google-genai
+    pip -q install flask
+    etc.
+    
     
     ```
 5.  **Escolha a Aplicação e Execute o código em Python**
@@ -71,7 +74,7 @@ Instruções para executar o projeto localmente:
 
 Este projeto teve como objetivo colocar em prática os conceitos aprendidos sobre Gemini Google na Imersão de IA promovida pela Alura de 12 a 16 de maio de 2025.
 
-Trata-se de um protótipo. Por esse motivo, a persistência do dados foi feita em um arquivo JSON, e não em um banco de dados. Colaborações são bem vindas.
+Trata-se de um protótipo. Por esse motivo, a persistência do dados foi feita em um arquivo JSON, e não em um banco de dados.
 
 Como próximos passos, pretendemos explorar o uso de agentes para dividir o trabalho em funções atômicas, a saber: identificar o tipo de imagem, obter os dados do livro de forma otimizada a partir de cada tipo de imagem, obter a resenha, e fazer revisões e verificações.
 
@@ -80,9 +83,7 @@ Futuro:
 ![image](https://github.com/user-attachments/assets/49902804-4721-4b7e-8552-eb24a53e542d)
 
 
-### 📄 Licença
 
-Distribuído sob a Licença GNU 3.0.
 
 ### ✉️ Contato
 
