@@ -55,7 +55,8 @@ Instruções para executar o projeto localmente:
 3.  **Instale as dependências:**
 
     ```bash
-    npm install  # Ou yarn install
+    %pip -q install google-genai
+    
     ```
 5.  **Escolha a Aplicação e Execute o código em Python**
 

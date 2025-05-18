@@ -11,8 +11,8 @@ import google.generativeai as genai
 
 # --- Configuração do Gemini ---
 # Certifique-se de configurar sua chave de API do Gemini como uma variável de ambiente
-# GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
-GOOGLE_API_KEY = "AIzaSyDgETZ9Y6vzhRm7Zda5f5XegajGdci7_Vo"
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+
 if not GOOGLE_API_KEY:
     raise ValueError("A variável de ambiente GOOGLE_API_KEY não está configurada.")
 
