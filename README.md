@@ -34,6 +34,7 @@ O fluxo de navegação é simples e eficaz:
 
 
 
+
 ### 🤖 Inteligência Artificial Integrada
 
 O processamento de IA utilizou apenas um Cliente da API Google GenAI, retornando todas as informações solicitadas: Título do Livro, Autor, Idioma e Resenha.
@@ -44,6 +45,9 @@ Finalmente uma forma fácil de cadastrar e gerenciar seus livros! E o Gemini ain
 
 ![image](https://github.com/user-attachments/assets/4ff4d037-d73e-4b07-bc46-d4b7f660910b)
 
+Obtenha os dados do livro por fotos da capa, da lombada, da ficha catalográfica ou do código ISBN:
+
+![image](https://github.com/user-attachments/assets/6ad1c02a-1f5d-4c48-86aa-0457b0d3cd66)
 
 
 ### 🚀 Como Rodar
@@ -81,6 +85,11 @@ Como próximos passos, pretendemos explorar o uso de agentes para dividir o trab
 Futuro: 
 
 ![image](https://github.com/user-attachments/assets/49902804-4721-4b7e-8552-eb24a53e542d)
+
+E mais! Cadastre vários livros de uma instante de uma só vez!
+
+![image](https://github.com/user-attachments/assets/18a1c0da-1c4b-4a98-8fb3-dd97881b3d51)
+
 
 
 
