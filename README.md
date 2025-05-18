@@ -11,16 +11,16 @@ O próprio código em Python, HTML, JS e CSS foi gerado 100% pelo **Google Gemin
 
 ### ✨ Motivação
 
-**Oportunidade:** Quem é apaixonado por livros quer ter sua biblioteca pessoal organizada.
+**Oportunidade:** Quem é apaixonado por livros quer ter sua biblioteca pessoal sempre organizada.
 
-**Problema:** Aplicativos e softwares disponíveis para isso requerem o cadastro manual dos livros, ou disponibilizam, quando muito, ferramentas ineficientes de busca das informações pelo código ISBN.
+**Problema:** Aplicativos e softwares que se propõem a fazer isso requerem cadastro manual dos livros, ou disponibilizam, quando muito, ferramentas ineficientes de busca das informações pelo código ISBN.
 
-**Solução:** Aplicativo Web, pensado para ser usado no celular, que **obtém as informações a partir de fotos tiradas dos livros**.  Para isso, utilizamos a **IA** do Google Gemini para tornar essa tarefa mais eficiente.
+**Solução:** Aplicativo Web que **obtém as informações a partir de fotos tiradas dos livros**.  Para isso, utilizamos a IA do **Google Gemini** para tornar essa tarefa mais eficiente.
 
 ### ⚙️ Como Funciona
 
 O **Biblioteca Doméstica** é uma aplicação Web com um CRUD básico que permite adicionar, editar, buscar e excluir livros de uma lista.
-O diferencial da é a utilização do Gemini Google para simplificar o processo de cadastro através do processamento de imagens.
+Seu diferencial é a utilização do **Gemini** para simplificar o processo de cadastro através do processamento de imagens.
 
 ![image](https://github.com/user-attachments/assets/e575357b-cd02-4cc6-a915-ae894976a4c8)
 
@@ -40,7 +40,7 @@ O processamento de IA utilizou apenas um Cliente da API Google GenAI, retornando
 
 ![image](https://github.com/user-attachments/assets/9045dff1-141d-4b4d-baf2-06c90d88716c)
 
-Finalmente uma forma fácil de cadastrar e gerenciar seus livros! E o Gemini ainda faz uma resenha com base nas informações da capa!
+Finalmente uma forma fácil de cadastrar e gerenciar seus livros! E o Gemini ainda gera uma resenha e pode classificar o livro segundo idioma, gênero literário, etc.
 
 ![image](https://github.com/user-attachments/assets/4ff4d037-d73e-4b07-bc46-d4b7f660910b)
 
@@ -60,9 +60,8 @@ Instruções para executar o projeto localmente:
     ```
 5.  **Escolha a Aplicação e Execute o código em Python**
 
-    * Para utilização de um IA com um Cliente da API GenAI: execute python **app;py**;
-
-    * Para utilização de Agentes com a API : execute python **app_agents.py**;
+    * Para utilização de um IA com um Cliente da API GenAI: execute python **app.py**;
+    * Futuramente, para utilização de Agentes: execute python **app_agetes.py**
 
 6.  **Abra no navegador:** Acesse `http://localhost:5000`.
 
