@@ -1,60 +1,62 @@
 {% extends "base.html" %}
 
-{% block title %}Meus Livros{% endblock %}
+{% block title %}Início{% endblock %}
 
 {% block content %}
-    <section class="hero">
+    <h2>Livros na Minha Biblioteca</h2>
 
-        <h1>Bem-vindo à sua Biblioteca Doméstica</h1>
-        <p>Gerencie seus livros de forma fácil e prática.</p>
-    </section>
+    <div class="filter-sort-section">
+        <form method="GET" action="{{ url_for('index') }}">
+            <label for="sort_by">Ordenar por:</label>
+            <select name="sort_by" id="sort_by" onchange="this.form.submit()">
+                <option value="titulo" {% if request.args.get('sort_by') == 'titulo' %}selected{% endif %}>Título</option>
+                <option value="autor" {% if request.args.get('sort_by') == 'autor' %}selected{% endif %}>Autor</option>
+            </select>
 
-    <section class="actions-bar">
-        <a href="{{ url_for('register_book') }}" class="btn btn-primary">Cadastrar Novo Livro</a>
-    </section>
-
-    <section class="search-section">
-        <h2>Buscar Livros</h2>
-        <form method="GET" action="{{ url_for('index') }}" class="search-bar">
-            <input type="text" name="query" placeholder="Buscar por título ou autor..." value="{{ query or '' }}">
-            <button type="submit" class="btn btn-secondary">Buscar</button>
-            {% if query %}
-                <a href="{{ url_for('index') }}" class="btn btn-link">Limpar Busca</a>
-            {% endif %}
-        </form>
-    </section>
-
-    <section class="book-collection">
-        <h2>Sua Coleção</h2>
-        {% if books %}
-            <div class="book-list">
-                {% for book in books %}
-                    <article class="book-item">
-                        <a href="{{ url_for('book_detail_route', book_id=book.id) }}" class="book-link">
-                            <div class="book-cover">
-                                {% if book.cover_path %}
-                                    <img src="{{ url_for('static', filename=book.cover_path) }}" alt="Capa de {{ book.title }}">
-                                {% else %}
-                                    <img src="{{ url_for('static', filename='uploads/default_cover.png') }}" alt="Capa Padrão">
-                                {% endif %}
-                            </div>
-                            <div class="book-info">
-                                <h3>{{ book.title }}</h3>
-                                <p class="author"><em>{{ book.author }}</em></p>
-                            </div>
-                        </a>
-<!--                        <div class="book-actions">-->
-<!--                             <a href="{{ url_for('edit_book', book_id=book.id) }}" class="btn btn-sm btn-secondary">Editar</a>-->
-<!--                        </div>-->
-                    </article>
+            <label for="genero">Filtrar por Gênero:</label>
+            <select name="genero" id="genero" onchange="this.form.submit()">
+                <option value="">Todos</option>
+                {% for genero in generos_unicos %}
+                    <option value="{{ genero }}" {% if selected_genre == genero %}selected{% endif %}>{{ genero }}</option>
                 {% endfor %}
-            </div>
-        {% else %}
-            {% if query %}
-                <p>Nenhum livro encontrado para sua busca por "{{ query }}".</p>
-            {% else %}
-                <p>Você ainda não cadastrou nenhum livro. <a href="{{ url_for('register_book') }}">Que tal cadastrar o primeiro agora?</a></p>
-            {% endif %}
-        {% endif %}
-    </section>
+            </select>
+
+            <label for="idioma">Filtrar por Idioma:</label>
+            <select name="idioma" id="idioma" onchange="this.form.submit()">
+                <option value="">Todos</option>
+                {% for idioma in idiomas_unicos %}
+                    <option value="{{ idioma }}" {% if selected_language == idioma %}selected{% endif %}>{{ idioma }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+
+    {% if livros %}
+        <table class="book-table">
+            <thead>
+                <tr>
+                    <th><a href="{{ url_for('index', sort_by='titulo', genero=request.args.get('genero'), idioma=request.args.get('idioma')) }}">Título</a></th>
+                    <th><a href="{{ url_for('index', sort_by='autor', genero=request.args.get('genero'), idioma=request.args.get('idioma')) }}">Autor</a></th>
+                    <th>Gênero</th>
+                    <th>Idioma</th>
+                    <th>Estante</th>
+                    <th>Prateleira</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for livro in livros %}
+                <tr>
+                    <td><a href="{{ url_for('book_detail', book_id=livro.id) }}">{{ livro.titulo }}</a></td>
+                    <td>{{ livro.autor }}</td>
+                    <td>{{ livro.genero }}</td>
+                    <td>{{ livro.idioma }}</td>
+                    <td>{{ livro.estante }}</td>
+                    <td>{{ livro.prateleira }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>Nenhum livro cadastrado ainda. <a href="{{ url_for('add_book') }}">Adicione um agora!</a></p>
+    {% endif %}
 {% endblock %}

@@ -1,37 +1,50 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-br">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Biblioteca Pessoal{% endblock %}</title>
+    <title>Minha Biblioteca Doméstica - {% block title %}{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    {% block head_extra %}{% endblock %} </head>
+    </head>
 <body>
-    <header>
+    <div class="container">
+        <header>
+            <img src="{{ url_for('static', filename='img/header_image.jpg') }}" alt="Minha Biblioteca" class="header-image">
+            <h1>Minha Biblioteca Doméstica</h1>
+        </header>
         <nav>
             <a href="{{ url_for('index') }}">Início</a>
-            <a href="{{ url_for('register_book') }}">Cadastrar Livro</a>
-            </nav>
-    </header>
+            <a href="{{ url_for('add_book') }}">Adicionar Livro</a>
+            <a href="{{ url_for('bulk_upload') }}">Adicionar Vários Livros</a>
+        </nav>
 
-    <main class="container">
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
-                <ul class="flashes">
-                {% for category, message in messages %}
-                    <li class="{{ category }}">{{ message }}</li>
-                {% endfor %}
-                </ul>
+                <div class="flash-messages">
+                    {% for category, message in messages %}
+                        <div class="flash-message {{ category }}">{{ message }}</div>
+                    {% endfor %}
+                </div>
             {% endif %}
         {% endwith %}
 
-        {% block content %}{% endblock %}
-    </main>
+        <main>
+            {% block content %}{% endblock %}
+        </main>
 
-    <footer>
-        <p>&copy; {{ current_year }} Minha Biblioteca Pessoal. Desenvolvido com Flask.</p>
-    </footer>
+        <footer>
+            <p>&copy; <span id="current-year"></span> Minha Biblioteca Doméstica</p>
+        </footer>
+    </div>
 
-    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
-    {% block scripts_extra %}{% endblock %} </body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const currentYearElement = document.getElementById('current-year');
+            if (currentYearElement) {
+                currentYearElement.textContent = moment().format('YYYY');
+            }
+        });
+    </script>
+</body>
 </html>
