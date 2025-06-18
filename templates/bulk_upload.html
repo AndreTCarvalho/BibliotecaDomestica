@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+
+{% block title %}Adicionar Vários Livros{% endblock %}
+
+{% block content %}
+    <h2>Adicionar Vários Livros</h2>
+
+    <form method="POST" enctype="multipart/form-data" id="bulk_upload_form">
+        <div class="form-group">
+            <label for="shelf_camera_button">Preencher formulários com foto da estante (via Gemini):</label><br>
+            <button type="button" id="shelf_camera_button" class="btn btn-secondary">Abrir Câmera para Estante</button>
+            <video id="shelf_camera_preview" class="camera-preview" autoplay style="display: none;"></video>
+            <canvas id="shelf_camera_canvas" style="display: none;"></canvas>
+            <button type="button" id="snap_shelf_gemini" class="btn btn-secondary camera-buttons" style="display: none;">Tirar Foto da Estante</button>
+            <p id="shelf_gemini_loading_status" style="display: none; color: blue;">Processando estante com Gemini...</p>
+        </div>
+
+        <div id="book_entries_container">
+            <div class="book-entry" id="book_entry_0">
+                <h3>Livro #1</h3>
+                <button type="button" class="delete-btn" onclick="removeBookEntry(0)">X</button>
+                <div class="form-group">
+                    <label for="titulo_0">Título:</label>
+                    <input type="text" id="titulo_0" name="titulo_0" required>
+                </div>
+                <div class="form-group">
+                    <label for="autor_0">Autor:</label>
+                    <input type="text" id="autor_0" name="autor_0" required>
+                </div>
+                <div class="form-group">
+                    <label for="genero_0">Gênero:</label>
+                    <input type="text" id="genero_0" name="genero_0">
+                </div>
+                <div class="form-group">
+                    <label for="idioma_0">Idioma:</label>
+                    <input type="text" id="idioma_0" name="idioma_0">
+                </div>
+                <div class="form-group">
+                    <label for="resenha_0">Resenha:</label>
+                    <textarea id="resenha_0" name="resenha_0"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="estante_0">Estante:</label>
+                    <input type="text" id="estante_0" name="estante_0">
+                </div>
+                <div class="form-group">
+                    <label for="prateleira_0">Prateleira:</label>
+                    <input type="text" id="prateleira_0" name="prateleira_0">
+                </div>
+                <div class="image-upload-options">
+                    <h4>Capa do Livro #1:</h4>
+                    <p>
+                        <label for="capa_file_0">Upload de Arquivo:</label>
+                        <input type="file" id="capa_file_0" name="capa_file_0" accept="image/*">
+                    </p>
+                    <p>
+                        <label for="capa_url_0">Usar URL de Imagem:</label>
+                        <input type="url" id="capa_url_0" name="capa_url_0" placeholder="http://example.com/capa.jpg">
+                    </p>
+                    <p>
+                        <label for="capa_camera_button_0">Tirar Foto com Câmera:</label><br>
+                        <button type="button" id="capa_camera_button_0" class="btn btn-secondary" onclick="setupCamera(`camera_preview_bulk_0`, `snap_bulk_0`, `capa_camera_data_0`, null)">Abrir Câmera</button>
+                        <video id="camera_preview_bulk_0" class="camera-preview" autoplay style="display: none;"></video>
+                        <canvas id="camera_canvas_bulk_0" style="display: none;"></canvas>
+                        <button type="button" id="snap_bulk_0" class="btn btn-secondary camera-buttons" style="display: none;">Tirar Foto</button>
+                        <input type="hidden" id="capa_camera_data_0" name="capa_camera_data_0">
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <button type="button" class="btn add-book-entry-btn" onclick="addBookEntry()">Adicionar Outro Livro</button>
+        <button type="submit" class="btn">Salvar Livros</button>
+    </form>
+
+    <script>
+        let bookEntryCount = 1; // Contador para IDs únicos dos campos
+
+        // Função para adicionar um novo bloco de formulário de livro
+        function addBookEntry(data = {}) {
+            const container = document.getElementById('book_entries_container');
+            const newIndex = bookEntryCount++;
+            const newEntryHtml = `
+                <div class="book-entry" id="book_entry_${newIndex}">
+                    <h3>Livro #${newIndex + 1}</h3>
+                    <button type="button" class="delete-btn" onclick="removeBookEntry(${newIndex})">X</button>
+                    <div class="form-group">
+                        <label for="titulo_${newIndex}">Título:</label>
+                        <input type="text" id="titulo_${newIndex}" name="titulo_${newIndex}" value="${data.titulo || ''}" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="autor_${newIndex}">Autor:</label>
+                        <input type="text" id="autor_${newIndex}" name="autor_${newIndex}" value="${data.autor || ''}" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="genero_${newIndex}">Gênero:</label>
+                        <input type="text" id="genero_${newIndex}" name="genero_${newIndex}" value="${data.genero || ''}">
+                    </div>
+                    <div class="form-group">
+                        <label for="idioma_${newIndex}">Idioma:</label>
+                        <input type="text" id="idioma_${newIndex}" name="idioma_${newIndex}" value="${data.idioma || ''}">
+                    </div>
+                    <div class="form-group">
+                        <label for="resenha_${newIndex}">Resenha:</label>
+                        <textarea id="resenha_${newIndex}" name="resenha_${newIndex}">${data.resenha || ''}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="estante_${newIndex}">Estante:</label>
+                        <input type="text" id="estante_${newIndex}" name="estante_${newIndex}" value="${data.estante || ''}">
+                    </div>
+                    <div class="form-group">
+                        <label for="prateleira_${newIndex}">Prateleira:</label>
+                        <input type="text" id="prateleira_${newIndex}" name="prateleira_${newIndex}" value="${data.prateleira || ''}">
+                    </div>
+                    <div class="image-upload-options">
+                        <h4>Capa do Livro #${newIndex + 1}:</h4>
+                        <p>
+                            <label for="capa_file_${newIndex}">Upload de Arquivo:</label>
+                            <input type="file" id="capa_file_${newIndex}" name="capa_file_${newIndex}" accept="image/*">
+                        </p>
+                        <p>
+                            <label for="capa_url_${newIndex}">Usar URL de Imagem:</label>
+                            <input type="url" id="capa_url_${newIndex}" name="capa_url_${newIndex}" placeholder="http://example.com/capa.jpg">
+                        </p>
+                        <p>
+                            <label for="capa_camera_button_${newIndex}">Tirar Foto com Câmera:</label><br>
+                            <button type="button" id="capa_camera_button_${newIndex}" class="btn btn-secondary" onclick="setupCamera('camera_preview_bulk_${newIndex}', 'snap_bulk_${newIndex}', 'capa_camera_data_${newIndex}', null)">Abrir Câmera</button>
+                            <video id="camera_preview_bulk_${newIndex}" class="camera-preview" autoplay style="display: none;"></video>
+                            <canvas id="camera_canvas_bulk_${newIndex}" style="display: none;"></canvas>
+                            <button type="button" id="snap_bulk_${newIndex}" class="btn btn-secondary camera-buttons" style="display: none;">Tirar Foto</button>
+                            <input type="hidden" id="capa_camera_data_${newIndex}" name="capa_camera_data_${newIndex}">
+                        </p>
+                    </div>
+                </div>
+            `;
+            container.insertAdjacentHTML('beforeend', newEntryHtml);
+        }
+
+        // Função para remover um bloco de formulário de livro
+        function removeBookEntry(index) {
+            const entry = document.getElementById(`book_entry_${index}`);
+            if (entry) {
+                entry.remove();
+            }
+        }
+
+        // Função para lidar com a câmera (reutilizada do book_form.html)
+        async function setupCamera(videoElementId, snapButtonId, inputDataId, processImageCallback) {
+            const video = document.getElementById(videoElementId);
+            const snapButton = document.getElementById(snapButtonId);
+            const inputData = inputDataId ? document.getElementById(inputDataId) : null;
+            const canvas = document.createElement('canvas');
+
+            // Parar qualquer stream de câmera ativo para evitar múltiplos streams
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                video.style.display = 'block';
+                snapButton.style.display = 'block';
+                // Esconder o botão de abrir câmera para evitar múltiplas aberturas
+                if (videoElementId.startsWith('camera_preview_bulk_')) { // Esconde apenas o botão de abrir câmera para capa individual
+                    document.getElementById(`capa_camera_button_${videoElementId.split('_')[3]}`).style.display = 'none';
+                }
+
+                snapButton.onclick = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    const context = canvas.getContext('2d');
+                    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    
+                    canvas.toBlob(async (blob) => {
+                        const file = new File([blob], "camera_capture.png", { type: "image/png" });
+                        
+                        if (processImageCallback) {
+                            await processImageCallback(file);
+                        } else if (inputData) {
+                            // Para upload direto como capa (se inputDataId for fornecido)
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                                inputData.value = reader.result;
+                            };
+                            reader.readAsDataURL(file);
+                        }
+
+                        stream.getTracks().forEach(track => track.stop()); // Parar a câmera
+                        video.style.display = 'none';
+                        snapButton.style.display = 'none';
+                        // Mostrar novamente o botão de abrir câmera
+                        if (videoElementId.startsWith('camera_preview_bulk_')) {
+                             document.getElementById(`capa_camera_button_${videoElementId.split('_')[3]}`).style.display = 'inline-block';
+                        }
+                    }, 'image/png');
+                };
+            } catch (error) {
+                console.error("Erro ao acessar a câmera:", error);
+                alert("Não foi possível acessar sua câmera. Certifique-se de ter dado permissão.");
+            }
+        }
+
+
+        // --- Lógica para o preenchimento automático de vários livros via Gemini (foto da estante) ---
+        const shelfCameraButton = document.getElementById('shelf_camera_button');
+        const shelfGeminiLoadingStatus = document.getElementById('shelf_gemini_loading_status');
+
+        if (shelfCameraButton) {
+            shelfCameraButton.onclick = () => {
+                setupCamera('shelf_camera_preview', 'snap_shelf_gemini', null, async (imageFile) => {
+                    shelfGeminiLoadingStatus.style.display = 'block';
+
+                    const formData = new FormData();
+                    formData.append('image', imageFile);
+
+                    try {
+                        const response = await fetch('/process_shelf_image', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        const data = await response.json();
+
+                        if (data.success && data.books.length > 0) {
+                            // Remove o primeiro formulário vazio para começar a preencher
+                            const initialEntry = document.getElementById('book_entry_0');
+                            if (initialEntry) {
+                                initialEntry.remove();
+                            }
+                            bookEntryCount = 0; // Resetar contador para IDs
+                            data.books.forEach(book => addBookEntry(book));
+                            alert('Livros preenchidos com sucesso pelo Gemini!');
+                        } else {
+                            alert('Nenhum livro detectado ou erro ao preencher dados com Gemini: ' + (data.error || ''));
+                        }
+                    } catch (error) {
+                        console.error('Erro na requisição Gemini (estante):', error);
+                        alert('Ocorreu um erro ao se comunicar com o Gemini para a estante.');
+                    } finally {
+                        shelfGeminiLoadingStatus.style.display = 'none';
+                    }
+                });
+            };
+        }
+
+    </script>
+{% endblock %}

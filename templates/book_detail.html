@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Detalhes do Livro{% endblock %}
+
+{% block content %}
+    <h2>Detalhes do Livro: {{ book.titulo }}</h2>
+
+    <div class="book-detail-card">
+        {% if book.capa %}
+            <img src="{{ book.capa if book.capa.startswith('http') else url_for('static', filename=book.capa) }}" alt="Capa do Livro" class="cover-image">
+        {% else %}
+            <img src="{{ url_for('static', filename='img/no_cover.png') }}" alt="Sem Capa" class="cover-image">
+        {% endif %}
+        <div class="details">
+            <p><strong>Título:</strong> {{ book.titulo }}</p>
+            <p><strong>Autor:</strong> {{ book.autor }}</p>
+            <p><strong>Gênero:</strong> {{ book.genero if book.genero else 'Não informado' }}</p>
+            <p><strong>Idioma:</strong> {{ book.idioma if book.idioma else 'Não informado' }}</p>
+            <p><strong>Estante:</strong> {{ book.estante if book.estante else 'Não informado' }}</p>
+            <p><strong>Prateleira:</strong> {{ book.prateleira if book.prateleira else 'Não informado' }}</p>
+            <p><strong>Resenha:</strong></p>
+            <p>{{ book.resenha if book.resenha else 'Nenhuma resenha disponível.' }}</p>
+        </div>
+    </div>
+
+    <div class="book-detail-actions">
+        <a href="{{ url_for('edit_book', book_id=book.id) }}" class="btn">Editar Livro</a>
+        <a href="{{ url_for('delete_book', book_id=book.id) }}" class="btn btn-danger">Deletar Livro</a>
+    </div>
+{% endblock %}

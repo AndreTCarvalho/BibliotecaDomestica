@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}Confirmar Exclusão{% endblock %}
+
+{% block content %}
+    <h2>Confirmar Exclusão</h2>
+    <p>Você tem certeza que deseja deletar o livro "<strong>{{ book.titulo }}</strong>" de <strong>{{ book.autor }}</strong>?</p>
+
+    <form method="POST">
+        <button type="submit" class="btn btn-danger">Sim, Deletar</button>
+        <a href="{{ url_for('book_detail', book_id=book.id) }}" class="btn btn-secondary">Cancelar</a>
+    </form>
+{% endblock %}
