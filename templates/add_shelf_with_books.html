@@ -1,0 +1,322 @@
+{% extends "base.html" %}
+
+{% block title %}Adicionar Prateleira com Livros{% endblock %}
+
+{% block content %}
+<section class="form-container">
+    <h1>Adicionar Nova Prateleira com Livros</h1>
+    <p>Defina a estante e a prateleira. Você pode fotografar a prateleira para o Gemini tentar identificar os livros, ou adicioná-los manualmente. Título e autor são obrigatórios para cada livro.</p>
+
+    {# NOVA SEÇÃO PARA CÂMERA DA PRATELEIRA #}
+    <div class="registration-options" style="margin-bottom: 20px;">
+        <button type="button" id="scan-shelf-gemini-btn" class="btn btn-info">
+            <img src="{{ url_for('static', filename='icons/camera.svg') }}" alt="" class="icon"> Fotografar Prateleira (Gemini)
+        </button>
+    </div>
+
+    <div id="shelf-camera-section-gemini" class="camera-section" style="display:none; margin-bottom: 20px;">
+        <h3>Analisar Prateleira com Gemini</h3>
+        <video id="shelf-camera-feed-gemini" autoplay playsinline muted></video>
+        <canvas id="shelf-snapshot-canvas-gemini" style="display:none;"></canvas>
+        <button id="shelf-take-snapshot-gemini-btn" class="btn btn-secondary" type="button">Analisar Foto da Prateleira</button>
+        <div id="shelf-snapshot-preview-container-gemini" style="margin-top:10px;">
+            <img id="shelf-snapshot-preview-gemini" src="#" alt="Prévia da Foto da Prateleira" style="display:none; max-width:300px; border:1px solid #ccc;"/>
+        </div>
+        <p id="shelf-gemini-status-message" class="status-message"></p>
+    </div>
+    {# FIM DA NOVA SEÇÃO #}
+
+    <form method="POST" action="{{ url_for('add_shelf_with_books') }}" class="book-form" id="add-shelf-form" enctype="multipart/form-data">
+        <div class="form-group">
+            <label for="bookshelf_name">Nome da Estante:</label>
+            <input type="text" id="bookshelf_name" name="bookshelf_name" value="{{ bookshelf_name or '' }}" required>
+        </div>
+        <div class="form-group">
+            <label for="shelf_name">Nome da Prateleira:</label>
+            <input type="text" id="shelf_name" name="shelf_name" value="{{ shelf_name or '' }}" required>
+        </div>
+
+        <hr style="margin: 20px 0;">
+
+        <h3>Livros a Adicionar:</h3>
+        <div id="book-entries-container">
+            {# A primeira linha de livro é agora opcional e pode ser adicionada via JS se necessário,
+               ou mantida se o usuário não usar o scan da prateleira.
+               Para simplificar, vamos começar com o container vazio e popular via JS.
+               Se o usuário não escanear, ele usará o botão "Adicionar Outro Livro".
+            #}
+        </div>
+
+        <button type="button" id="add-book-row-btn" class="btn btn-secondary" style="margin-top: 10px; margin-bottom: 20px;">
+            <img src="{{ url_for('static', filename='icons/plus.svg') }}" alt="" class="icon"> Adicionar Livro Manualmente
+        </button>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Salvar Prateleira e Livros</button>
+            <a href="{{ url_for('index') }}" class="btn btn-secondary">Cancelar</a>
+        </div>
+    </form>
+</section>
+{% endblock %}
+
+{% block scripts_extra %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const addBookRowBtn = document.getElementById('add-book-row-btn');
+    const bookEntriesContainer = document.getElementById('book-entries-container');
+    let globalBookRowIndex = 0; // Índice global para nomes de rádio únicos
+
+    // --- Elementos da Câmera da Prateleira (Shelf Camera) ---
+    const scanShelfGeminiBtn = document.getElementById('scan-shelf-gemini-btn');
+    const shelfCameraSectionGemini = document.getElementById('shelf-camera-section-gemini');
+    const shelfVideoElementGemini = document.getElementById('shelf-camera-feed-gemini');
+    const shelfCanvasElementGemini = document.getElementById('shelf-snapshot-canvas-gemini');
+    const shelfTakeSnapshotGeminiBtn = document.getElementById('shelf-take-snapshot-gemini-btn');
+    const shelfSnapshotPreviewGemini = document.getElementById('shelf-snapshot-preview-gemini');
+    const shelfGeminiStatusMessage = document.getElementById('shelf-gemini-status-message');
+    let shelfCameraStreamGemini;
+
+    // Função para lidar com a exibição do input de arquivo de capa
+    function handleCoverOptionChange(radioGroup, fileInput) {
+        radioGroup.forEach(radio => {
+            radio.addEventListener('change', function() {
+                if (this.value === 'file') {
+                    fileInput.style.display = 'block';
+                } else {
+                    fileInput.style.display = 'none';
+                    fileInput.value = ''; // Limpa o arquivo se "Nenhuma" for selecionado
+                }
+            });
+        });
+    }
+
+    // Função para criar uma nova linha de entrada de livro (com ou sem dados pré-preenchidos)
+    function createBookEntryRow(bookData = null) {
+        const rowIndex = globalBookRowIndex++; // Usa e incrementa o índice global
+        const newRow = document.createElement('div');
+        newRow.classList.add('book-entry-row');
+        newRow.style.borderTop = '1px dashed #ccc';
+        newRow.style.paddingTop = '15px';
+        newRow.style.marginTop = '15px';
+
+        const fields = [
+            { label: 'Título:', type: 'text', name: 'titles[]', placeholder: 'Título do Livro', value: bookData?.title || '' },
+            { label: 'Autor:', type: 'text', name: 'authors[]', placeholder: 'Autor do Livro', value: bookData?.author || '' },
+            { label: 'Gênero:', type: 'text', name: 'genres[]', placeholder: 'Gênero (opcional)', value: bookData?.genre || '' },
+            { label: 'Idioma:', type: 'text', name: 'languages[]', placeholder: 'Idioma (opcional)', value: bookData?.language || '' }
+        ];
+
+        fields.forEach(field => {
+            const group = document.createElement('div');
+            group.classList.add('form-group');
+            const label = document.createElement('label');
+            label.textContent = field.label;
+            const input = document.createElement('input');
+            input.type = field.type;
+            input.name = field.name;
+            input.placeholder = field.placeholder;
+            input.value = field.value;
+            group.appendChild(label);
+            group.appendChild(input);
+            newRow.appendChild(group);
+        });
+
+        const reviewGroup = document.createElement('div');
+        reviewGroup.classList.add('form-group');
+        const reviewLabel = document.createElement('label');
+        reviewLabel.textContent = 'Resenha/Notas:';
+        const reviewTextarea = document.createElement('textarea');
+        reviewTextarea.name = 'reviews[]';
+        reviewTextarea.placeholder = 'Resenha ou notas (opcional)';
+        reviewTextarea.rows = 3;
+        reviewTextarea.value = bookData?.review || '';
+        reviewGroup.appendChild(reviewLabel);
+        reviewGroup.appendChild(reviewTextarea);
+        newRow.appendChild(reviewGroup);
+
+        const coverGroup = document.createElement('div');
+        coverGroup.classList.add('form-group');
+        const coverLabel = document.createElement('label');
+        coverLabel.textContent = 'Opção de Capa:';
+        coverGroup.appendChild(coverLabel);
+        const radioContainer = document.createElement('div');
+        radioContainer.classList.add('radio-options-inline');
+        const radioName = `cover_options_${rowIndex}`;
+
+        ['none', 'file'].forEach(val => {
+            const optionLabel = document.createElement('label');
+            const optionInput = document.createElement('input');
+            optionInput.type = 'radio';
+            optionInput.name = radioName;
+            optionInput.value = val;
+            if (val === 'none') optionInput.checked = true;
+            optionLabel.appendChild(optionInput);
+            optionLabel.append(val === 'none' ? ' Nenhuma' : ' Arquivo');
+            radioContainer.appendChild(optionLabel);
+        });
+        coverGroup.appendChild(radioContainer);
+
+        const coverFileInput = document.createElement('input');
+        coverFileInput.type = 'file';
+        coverFileInput.name = 'cover_files[]';
+        coverFileInput.accept = 'image/*';
+        coverFileInput.classList.add('cover-file-input');
+        coverFileInput.style.display = 'none';
+        coverFileInput.style.marginTop = '5px';
+        coverGroup.appendChild(coverFileInput);
+        newRow.appendChild(coverGroup);
+
+        const newCoverRadios = newRow.querySelectorAll(`input[name="${radioName}"]`);
+        handleCoverOptionChange(newCoverRadios, coverFileInput);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.textContent = 'Remover este Livro';
+        removeBtn.classList.add('btn', 'btn-danger', 'btn-sm');
+        removeBtn.style.marginTop = '10px';
+        removeBtn.onclick = function() { newRow.remove(); };
+        newRow.appendChild(removeBtn);
+
+        return newRow;
+    }
+
+    // Adicionar linha de livro manualmente
+    addBookRowBtn.addEventListener('click', function() {
+        const rowElement = createBookEntryRow();
+        bookEntriesContainer.appendChild(rowElement);
+    });
+
+    // --- Lógica da Câmera da Prateleira (Shelf Camera Gemini) ---
+    scanShelfGeminiBtn.addEventListener('click', async () => {
+        if (shelfCameraSectionGemini.style.display === 'none') {
+            try {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    shelfGeminiStatusMessage.textContent = 'Seu navegador não suporta acesso à câmera.';
+                    return;
+                }
+                shelfCameraStreamGemini = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                shelfVideoElementGemini.srcObject = shelfCameraStreamGemini;
+                shelfVideoElementGemini.play();
+                shelfCameraSectionGemini.style.display = 'block';
+                scanShelfGeminiBtn.innerHTML = '<img src="{{ url_for('static', filename='icons/camera-off.svg') }}" alt="" class="icon"> Fechar Câmera da Prateleira';
+                shelfGeminiStatusMessage.textContent = 'Câmera ativa. Aponte para a prateleira.';
+            } catch (err) {
+                console.error("Erro ao acessar a câmera da prateleira: ", err);
+                shelfGeminiStatusMessage.textContent = `Erro ao acessar câmera: ${err.name}. Verifique as permissões.`;
+            }
+        } else {
+            if (shelfCameraStreamGemini) {
+                shelfCameraStreamGemini.getTracks().forEach(track => track.stop());
+            }
+            shelfVideoElementGemini.srcObject = null;
+            shelfCameraSectionGemini.style.display = 'none';
+            scanShelfGeminiBtn.innerHTML = '<img src="{{ url_for('static', filename='icons/camera.svg') }}" alt="" class="icon"> Fotografar Prateleira (Gemini)';
+            shelfGeminiStatusMessage.textContent = '';
+            shelfSnapshotPreviewGemini.style.display = 'none';
+            shelfSnapshotPreviewGemini.src = '#';
+        }
+    });
+
+    shelfTakeSnapshotGeminiBtn.addEventListener('click', async () => {
+        if (!shelfCameraStreamGemini || !shelfVideoElementGemini.srcObject || shelfVideoElementGemini.paused || shelfVideoElementGemini.ended) {
+            shelfGeminiStatusMessage.textContent = 'Câmera da prateleira não está pronta.';
+            return;
+        }
+        shelfGeminiStatusMessage.textContent = 'Capturando foto da prateleira...';
+        shelfCanvasElementGemini.width = shelfVideoElementGemini.videoWidth;
+        shelfCanvasElementGemini.height = shelfVideoElementGemini.videoHeight;
+        const context = shelfCanvasElementGemini.getContext('2d');
+        context.drawImage(shelfVideoElementGemini, 0, 0, shelfCanvasElementGemini.width, shelfCanvasElementGemini.height);
+        const imageDataUrl = shelfCanvasElementGemini.toDataURL('image/jpeg', 0.9);
+        shelfSnapshotPreviewGemini.src = imageDataUrl;
+        shelfSnapshotPreviewGemini.style.display = 'block';
+        shelfGeminiStatusMessage.textContent = 'Foto capturada. Enviando para análise do Gemini...';
+
+        try {
+            const blob = await (await fetch(imageDataUrl)).blob();
+            const formData = new FormData();
+            formData.append('shelf_image_data', blob, 'shelf_snapshot.jpeg'); // Nome do campo diferente
+
+            // ATENÇÃO: O endpoint '/analyze_shelf_via_gemini' precisa ser criado no app.py
+            const response = await fetch("{{ url_for('analyze_shelf_via_gemini') }}", { // NOVO ENDPOINT
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: "Erro desconhecido do servidor." }));
+                throw new Error(errorData.error || `Erro HTTP: ${response.status}`);
+            }
+
+            const booksFound = await response.json(); // Espera-se um array de objetos de livro
+
+            if (booksFound && booksFound.length > 0) {
+                bookEntriesContainer.innerHTML = ''; // Limpa entradas existentes
+                globalBookRowIndex = 0; // Reseta o índice global
+                booksFound.forEach(book => {
+                    const rowElement = createBookEntryRow(book);
+                    bookEntriesContainer.appendChild(rowElement);
+                });
+                shelfGeminiStatusMessage.textContent = `${booksFound.length} livro(s) identificado(s) e pré-preenchido(s)!`;
+                shelfGeminiStatusMessage.style.color = '#155724';
+            } else {
+                shelfGeminiStatusMessage.textContent = 'Nenhum livro pôde ser identificado na imagem pela IA.';
+                shelfGeminiStatusMessage.style.color = '#856404';
+            }
+
+        } catch (error) {
+            console.error('Erro ao analisar prateleira com Gemini:', error);
+            shelfGeminiStatusMessage.textContent = `Erro na análise: ${error.message}`;
+            shelfGeminiStatusMessage.style.color = '#721c24';
+        }
+    });
+
+    // Adiciona uma linha de livro vazia se o container estiver vazio ao carregar (opcional)
+    if (bookEntriesContainer.children.length === 0) {
+        const initialRow = createBookEntryRow();
+        bookEntriesContainer.appendChild(initialRow);
+    }
+
+});
+</script>
+<style>
+    .book-entry-row {
+        background-color: #f9f9f9;
+        padding: 15px;
+        border-radius: 5px;
+        margin-bottom: 15px; /* Espaço entre as entradas de livro */
+    }
+    .book-entry-row .form-group {
+        margin-bottom: 10px; /* Espaço menor entre campos dentro de uma entrada */
+    }
+    .book-entry-row label { /* Labels dentro de cada entrada de livro */
+        font-size: 0.9em;
+        font-weight: 500;
+    }
+    .radio-options-inline label {
+        margin-right: 15px;
+        font-weight: normal;
+    }
+    .radio-options-inline input[type="radio"] {
+        margin-right: 5px;
+    }
+    /* Estilos para a nova seção de câmera da prateleira */
+    #shelf-camera-section-gemini video {
+        width: 100%;
+        max-width: 400px; /* Ou ajuste conforme necessário */
+        height: auto;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        display: block;
+        margin: 0 auto 10px auto;
+        background-color: #000;
+    }
+    #shelf-camera-section-gemini #shelf-snapshot-preview-gemini {
+         display: block;
+        margin: 10px auto 0 auto;
+        max-width: 300px; /* Ou ajuste */
+        border: 1px solid #ddd;
+        border-radius: 4px;
+    }
+</style>
+{% endblock %}

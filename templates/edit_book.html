@@ -1,0 +1,335 @@
+{% extends "base.html" %}
+
+{% block title %}Editar Livro: {{ book.title }}{% endblock %}
+
+{% block content %}
+    <section class="form-container">
+        <h1>Editar Livro</h1>
+
+        <form method="POST" action="{{ url_for('edit_book', book_id=book.id) }}" enctype="multipart/form-data" class="book-form" id="edit-book-form">
+            <div class="form-group">
+                <label for="title">Título:</label>
+                <input type="text" id="title" name="title" value="{{ book.title }}" required>
+            </div>
+            <div class="form-group">
+                <label for="author">Autor:</label>
+                <input type="text" id="author" name="author" value="{{ book.author }}" required>
+            </div>
+            {# CAMPO DE GÊNERO ADICIONADO ABAIXO #}
+            <div class="form-group">
+                <label for="genre">Gênero:</label>
+                <input type="text" id="genre" name="genre" value="{{ book.genre or '' }}">
+            </div>
+            {# FIM DA ADIÇÃO DO CAMPO DE GÊNERO #}
+            <div class="form-group">
+                <label for="language">Idioma:</label>
+                <input type="text" id="language" name="language" value="{{ book.language or '' }}">
+            </div>
+            <div class="form-group">
+                <label for="bookshelf">Estante:</label>
+                <input type="text" id="bookshelf" name="bookshelf" value="{{ book.bookshelf or '' }}">
+            </div>
+            <div class="form-group">
+                <label for="shelf">Prateleira:</label>
+                <input type="text" id="shelf" name="shelf" value="{{ book.shelf or '' }}">
+            </div>
+            <div class="form-group">
+                <label for="review">Resenha/Notas:</label>
+                <textarea id="review" name="review" rows="4">{{ book.review or '' }}</textarea>
+            </div>
+
+            <div class="form-group cover-upload-options">
+                <label>Opções de Capa:</label>
+                <div class="radio-options">
+                    <label>
+                        <input type="radio" name="cover_option" value="current" checked> Manter capa atual
+                    </label>
+                    <label>
+                        <input type="radio" name="cover_option" value="file"> Carregar de arquivo
+                    </label>
+                    <label>
+                        <input type="radio" name="cover_option" value="camera"> Tirar foto (câmera)
+                    </label>
+                    <label>
+                        <input type="radio" name="cover_option" value="url"> Carregar de URL
+                    </label>
+                </div>
+
+                <div id="file-upload-section" class="cover-option-section" style="display: none;">
+                    <label for="cover_file">Selecione o arquivo da capa:</label>
+                    <input type="file" id="cover_file" name="cover_file" accept="image/*">
+                </div>
+
+                <div id="camera-upload-section" class="cover-option-section" style="display: none;">
+                    <button type="button" id="toggle-camera-btn" class="btn btn-info">
+                        <img src="{{ url_for('static', filename='icons/camera.svg') }}" alt="" class="icon"> Ativar Câmera
+                    </button>
+                    <div id="camera-feed-container" style="display: none; margin-top: 10px; border: 1px solid #ccc; padding: 10px; border-radius: 5px;">
+                        <p>Aponte a câmera para a capa do livro:</p>
+                        <video id="camera-feed" width="320" height="240" autoplay playsinline></video>
+                        <canvas id="snapshot-canvas" width="320" height="240" style="display:none;"></canvas>
+                        <button type="button" id="take-snapshot-btn" class="btn btn-primary" style="margin-top: 5px;">Tirar Foto da Capa</button>
+                        <div id="camera-status-message" class="form-text text-muted"></div>
+                    </div>
+                </div>
+
+                <div id="url-upload-section" class="cover-option-section" style="display: none;">
+                    <label for="cover_url">URL da Imagem:</label>
+                    <input type="url" id="cover_url" name="cover_url" placeholder="http://exemplo.com/capa.jpg">
+                    <button type="button" id="preview-url-btn" class="btn btn-secondary btn-sm" style="margin-top: 5px;">Ver Prévia da URL</button>
+                    <div id="url-status-message" class="form-text text-muted" style="display: none;"></div>
+                </div>
+
+                <div class="image-preview-container" style="margin-top:20px;">
+                    <p>Prévia da Capa:</p>
+                    <img id="cover-preview"
+                         src="{% if book.cover_path %}{{ url_for('static', filename=book.cover_path) }}{% else %}{{ url_for('static', filename='uploads/default_cover.png') }}{% endif %}"
+                         alt="Prévia da Capa"
+                         class="default-cover-preview">
+                    <input type="hidden" id="cover_image_data" name="cover_image_data"> {# Para dados da câmera #}
+                    <input type="hidden" id="final_cover_url" name="final_cover_url"> {# Para URL de capa #}
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">Salvar Alterações</button>
+                <a href="{{ url_for('book_detail_route', book_id=book.id) }}" class="btn btn-secondary">Cancelar</a>
+            </div>
+        </form>
+    </section>
+{% endblock %}
+
+{% block scripts_extra %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const coverOptionRadios = document.querySelectorAll('input[name="cover_option"]');
+    const fileUploadSection = document.getElementById('file-upload-section');
+    const cameraUploadSection = document.getElementById('camera-upload-section');
+    const urlUploadSection = document.getElementById('url-upload-section');
+    const coverPreview = document.getElementById('cover-preview');
+    const defaultCoverPath = "{{ url_for('static', filename='uploads/default_cover.png') }}";
+    const currentCoverPath = "{% if book.cover_path %}{{ url_for('static', filename=book.cover_path) }}{% else %}{{ url_for('static', filename='uploads/default_cover.png') }}{% endif %}";
+    const coverImageDataInput = document.getElementById('cover_image_data');
+    const finalCoverUrlInput = document.getElementById('final_cover_url');
+
+    // Câmera
+    const toggleCameraBtn = document.getElementById('toggle-camera-btn');
+    const cameraFeedContainer = document.getElementById('camera-feed-container');
+    const videoElement = document.getElementById('camera-feed');
+    const canvasElement = document.getElementById('snapshot-canvas');
+    const takeSnapshotBtn = document.getElementById('take-snapshot-btn');
+    const cameraStatusMessage = document.getElementById('camera-status-message');
+    let cameraStream;
+
+    // Carregar de arquivo
+    const coverFileInput = document.getElementById('cover_file');
+
+    // Carregar de URL
+    const coverUrlInput = document.getElementById('cover_url');
+    const previewUrlBtn = document.getElementById('preview-url-btn');
+    const urlStatusMessage = document.getElementById('url-status-message');
+
+    // Função para resetar e mostrar a seção correta
+    function showSelectedCoverOption(option) {
+        // Esconder todas as seções e limpar prévias específicas
+        fileUploadSection.style.display = 'none';
+        cameraUploadSection.style.display = 'none';
+        urlUploadSection.style.display = 'none';
+
+        // Limpar dados de input ocultos para evitar envio de dados de uma opção desativada
+        coverImageDataInput.value = '';
+        finalCoverUrlInput.value = '';
+
+        // Resetar campos de input visíveis
+        coverFileInput.value = '';
+        coverUrlInput.value = '';
+
+        // Parar câmera se estiver ativa
+        if (cameraStream) {
+            cameraStream.getTracks().forEach(track => track.stop());
+            videoElement.srcObject = null;
+            cameraFeedContainer.style.display = 'none';
+            toggleCameraBtn.innerHTML = '<img src="{{ url_for('static', filename='icons/camera.svg') }}" alt="" class="icon"> Ativar Câmera';
+            cameraStatusMessage.textContent = '';
+        }
+        urlStatusMessage.style.display = 'none';
+        urlStatusMessage.textContent = '';
+
+        // Exibir seção e ajustar prévia conforme a opção
+        if (option === 'file') {
+            fileUploadSection.style.display = 'block';
+            coverPreview.src = defaultCoverPath; // Mostra padrão ao escolher novo arquivo
+        } else if (option === 'camera') {
+            cameraUploadSection.style.display = 'block';
+            coverPreview.src = defaultCoverPath; // Mostra padrão ao escolher câmera
+        } else if (option === 'url') {
+            urlUploadSection.style.display = 'block';
+            coverPreview.src = defaultCoverPath; // Mostra padrão ao escolher URL
+        } else if (option === 'current') {
+            coverPreview.src = currentCoverPath; // Volta para a capa atual do livro
+        } else {
+            // Se 'none' fosse uma opção válida vinda de um radio, cairia aqui.
+            // Como removemos, este else é um fallback geral.
+            coverPreview.src = defaultCoverPath;
+        }
+
+        // Garante que o input de file e url não sejam 'required' se não estiverem ativos
+        coverFileInput.required = (option === 'file');
+        coverUrlInput.required = (option === 'url');
+    }
+
+    // Listener para as opções de rádio
+    coverOptionRadios.forEach(radio => {
+        radio.addEventListener('change', (event) => {
+            showSelectedCoverOption(event.target.value);
+        });
+    });
+
+    // Inicializa a exibição da opção selecionada.
+    // Como "Manter capa atual" é 'checked' no HTML, initialSelectedOption será 'current'.
+    const initialSelectedOption = document.querySelector('input[name="cover_option"]:checked').value;
+    showSelectedCoverOption(initialSelectedOption);
+
+    // --- Lógica para Câmera --- (MESMA LÓGICA DO REGISTER)
+    toggleCameraBtn.addEventListener('click', async () => {
+        if (cameraFeedContainer.style.display === 'none') {
+            try {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    alert('Seu navegador não suporta acesso à câmera.');
+                    cameraStatusMessage.textContent = 'Acesso à câmera não suportado.';
+                    return;
+                }
+                cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                videoElement.srcObject = cameraStream;
+                videoElement.play();
+                cameraFeedContainer.style.display = 'block';
+                toggleCameraBtn.innerHTML = '<img src="{{ url_for('static', filename='icons/camera-off.svg') }}" alt="" class="icon"> Fechar Câmera';
+                cameraStatusMessage.textContent = 'Câmera ativa. Aponte para a capa do livro.';
+            } catch (err) {
+                console.error("Erro ao acessar a câmera: ", err);
+                alert('Erro ao acessar a câmera. Verifique as permissões.');
+                cameraStatusMessage.textContent = `Erro ao acessar câmera: ${err.name}.`;
+            }
+        } else {
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(track => track.stop());
+            }
+            videoElement.srcObject = null;
+            cameraFeedContainer.style.display = 'none';
+            toggleCameraBtn.innerHTML = '<img src="{{ url_for('static', filename='icons/camera.svg') }}" alt="" class="icon"> Ativar Câmera';
+            cameraStatusMessage.textContent = '';
+        }
+    });
+
+    takeSnapshotBtn.addEventListener('click', () => {
+        if (!cameraStream || !videoElement.srcObject || videoElement.paused || videoElement.ended || videoElement.readyState < videoElement.HAVE_CURRENT_DATA) {
+            alert("A câmera não está ativa ou pronta.");
+            cameraStatusMessage.textContent = 'Câmera não está pronta.';
+            return;
+        }
+        cameraStatusMessage.textContent = 'Capturando foto da capa...';
+
+        canvasElement.width = videoElement.videoWidth;
+        canvasElement.height = videoElement.videoHeight;
+        const context = canvasElement.getContext('2d');
+        context.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+
+        const imageDataUrl = canvasElement.toDataURL('image/webp', 0.9); // Use 'image/jpeg' ou 'image/webp'
+        coverPreview.src = imageDataUrl;
+        coverImageDataInput.value = imageDataUrl; // Armazena o Data URL para envio
+        finalCoverUrlInput.value = ''; // Garante que a URL não seja enviada se a câmera for usada
+        cameraStatusMessage.textContent = 'Foto da capa capturada!';
+    });
+
+    // --- Lógica para Carregar de Arquivo --- (MESMA LÓGICA DO REGISTER)
+    coverFileInput.addEventListener('change', function() {
+        if (this.files && this.files[0]) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                coverPreview.src = e.target.result;
+                coverImageDataInput.value = ''; // Limpa dados da câmera
+                finalCoverUrlInput.value = ''; // Limpa dados da URL
+            };
+            reader.readAsDataURL(this.files[0]);
+        } else {
+             // Se nenhum arquivo for selecionado, e a opção 'file' ainda estiver marcada,
+            // a prévia volta para a padrão.
+            if (document.querySelector('input[name="cover_option"]:checked').value === 'file') {
+                coverPreview.src = defaultCoverPath;
+            }
+        }
+    });
+
+    // --- Lógica para Carregar de URL --- (MESMA LÓGICA DO REGISTER)
+    previewUrlBtn.addEventListener('click', function() {
+        const url = coverUrlInput.value.trim();
+        if (url) {
+            urlStatusMessage.style.display = 'block';
+            urlStatusMessage.textContent = 'Carregando prévia...';
+            const img = new Image();
+            img.onload = function() {
+                coverPreview.src = url;
+                finalCoverUrlInput.value = url; // Define a URL final para envio
+                coverImageDataInput.value = ''; // Limpa dados da câmera
+                urlStatusMessage.textContent = 'Prévia carregada com sucesso.';
+                urlStatusMessage.style.color = '#155724'; // Cor de sucesso
+            };
+            img.onerror = function() {
+                coverPreview.src = defaultCoverPath; // Volta para capa padrão em caso de erro
+                finalCoverUrlInput.value = ''; // Limpa a URL final em caso de erro
+                urlStatusMessage.textContent = 'Erro ao carregar imagem da URL. Verifique o link.';
+                urlStatusMessage.style.color = '#721c24'; // Cor de erro
+            };
+            img.src = url;
+        } else {
+            coverPreview.src = defaultCoverPath;
+            finalCoverUrlInput.value = '';
+            urlStatusMessage.style.display = 'block';
+            urlStatusMessage.textContent = 'Por favor, insira uma URL.';
+            urlStatusMessage.style.color = '#856404'; // Cor de aviso
+        }
+    });
+
+    coverUrlInput.addEventListener('input', function() {
+        // Se a opção URL estiver selecionada
+        const selectedRadio = document.querySelector('input[name="cover_option"]:checked');
+        if (selectedRadio && selectedRadio.value === 'url') {
+            // Ao digitar na URL, reseta a prévia para a padrão até clicar em "Ver Prévia"
+            coverPreview.src = defaultCoverPath;
+            finalCoverUrlInput.value = ''; // Limpa a URL final até ser validada
+            urlStatusMessage.style.display = 'none';
+            urlStatusMessage.textContent = '';
+        }
+    });
+
+    // Manipula o submit do formulário para garantir que apenas os dados corretos sejam enviados
+    document.getElementById('edit-book-form').addEventListener('submit', function(event) {
+        const selectedOption = document.querySelector('input[name="cover_option"]:checked').value;
+
+        console.log("Opção de capa selecionada no frontend (edit):", selectedOption);
+
+        // Limpa os campos não utilizados para evitar envio de dados incorretos
+        if (selectedOption !== 'file') {
+            coverFileInput.value = ''; // Limpa o input file
+        }
+        if (selectedOption !== 'camera') {
+            coverImageDataInput.value = ''; // Limpa o data URL da câmera
+        }
+        if (selectedOption !== 'url') {
+            finalCoverUrlInput.value = ''; // Limpa o URL final
+            coverUrlInput.value = ''; // Limpa o input de URL visível
+        }
+
+        // Se 'current' for selecionado (única opção restante que não é upload),
+        // garante que nenhum dado de novo upload seja enviado.
+        // O backend lidará com manter a capa atual.
+        if (selectedOption === 'current') {
+            coverFileInput.value = '';
+            coverImageDataInput.value = '';
+            finalCoverUrlInput.value = '';
+            coverUrlInput.value = '';
+        }
+    });
+});
+</script>
+{% endblock %}

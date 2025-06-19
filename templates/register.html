@@ -1,0 +1,493 @@
+{% extends "base.html" %}
+
+{% block title %}Cadastrar Novo Livro{% endblock %}
+
+{% block content %}
+    <section class="form-container">
+        <h1>Cadastrar Novo Livro</h1>
+        <p>Preencha os campos manualmente ou use a câmera para buscar informações do livro (requer integração com Gemini).</p>
+
+        <div class="registration-options">
+            <button id="toggle-camera-gemini-btn" class="btn btn-info" type="button">
+                <img src="{{ url_for('static', filename='icons/camera.svg') }}" alt="" class="icon"> Fotografe a Capa do Livro
+            </button>
+        </div>
+
+        <div id="camera-section-gemini" class="camera-section" style="display:none; margin-bottom: 20px;">
+            <h3>Usar Câmera para Informações do Livro</h3>
+            <video id="camera-feed-gemini" autoplay playsinline muted></video>
+            <canvas id="snapshot-canvas-gemini" style="display:none;"></canvas>
+            <button id="take-snapshot-gemini-btn" class="btn btn-secondary" type="button">Tirar Foto para Análise</button>
+            <div id="snapshot-preview-container-gemini" style="margin-top:10px;">
+                <img id="snapshot-preview-gemini" src="#" alt="Prévia da Foto para Análise" style="display:none; max-width:200px; border:1px solid #ccc;"/>
+            </div>
+            <p id="gemini-status-message" class="status-message"></p>
+        </div>
+
+        <hr>
+
+        <form method="POST" action="{{ url_for('register_book') }}" enctype="multipart/form-data" class="book-form" id="register-book-form">
+            <div class="form-group">
+                <label for="title">Título:</label>
+                <input type="text" id="title" name="title" value="{{ form_data.get('title', '') }}" required>
+            </div>
+            <div class="form-group">
+                <label for="author">Autor:</label>
+                <input type="text" id="author" name="author" value="{{ form_data.get('author', '') }}" required>
+            </div>
+            <div class="form-group">
+                <label for="genre">Gênero:</label> {# NOVO CAMPO DE GÊNERO #}
+                <input type="text" id="genre" name="genre" value="{{ form_data.get('genre', '') }}">
+            </div>
+            <div class="form-group">
+                <label for="language">Idioma:</label>
+                <input type="text" id="language" name="language" value="{{ form_data.get('language', '') }}">
+            </div>
+             <div class="form-group">
+                <label for="bookshelf">Estante:</label>
+                <input type="text" id="bookshelf" name="bookshelf" value="{{ form_data.get('bookshelf', '') }}">
+            </div>
+            <div class="form-group">
+                <label for="shelf">Prateleira:</label>
+                <input type="text" id="shelf" name="shelf" value="{{ form_data.get('shelf', '') }}">
+            </div>
+
+            <div class="form-group">
+                <label for="review">Resenha/Notas:</label>
+                <textarea id="review" name="review" rows="4">{{ form_data.get('review', '') }}</textarea>
+            </div>
+
+            <div class="form-group cover-upload-options">
+                <label>Opções de Capa:</label>
+                <div class="radio-options">
+                    <label>
+                        <input type="radio" name="cover_option" value="none" checked> Não cadastrar (usar capa padrão)
+                    </label>
+                    <label>
+                        <input type="radio" name="cover_option" value="file"> Carregar de arquivo
+                    </label>
+                    <label>
+                        <input type="radio" name="cover_option" value="camera"> Tirar foto (câmera)
+                    </label>
+                    <label>
+                        <input type="radio" name="cover_option" value="url"> Carregar de URL
+                    </label>
+                </div>
+
+                <div id="file-upload-section" class="cover-option-section" style="display: none;">
+                    <label for="cover_file">Selecione o arquivo da capa:</label>
+                    <input type="file" id="cover_file" name="cover_file" accept="image/*">
+                </div>
+
+                <div id="camera-upload-section" class="cover-option-section" style="display: none;">
+                    <button type="button" id="toggle-camera-btn" class="btn btn-info">
+                        <img src="{{ url_for('static', filename='icons/camera.svg') }}" alt="" class="icon"> Ativar Câmera
+                    </button>
+                    <div id="camera-feed-container" style="display: none; margin-top: 10px; border: 1px solid #ccc; padding: 10px; border-radius: 5px;">
+                        <p>Aponte a câmera para a capa do livro:</p>
+                        <video id="camera-feed" width="320" height="240" autoplay playsinline></video>
+                        <canvas id="snapshot-canvas" width="320" height="240" style="display:none;"></canvas>
+                        <button type="button" id="take-snapshot-btn" class="btn btn-primary" style="margin-top: 5px;">Tirar Foto da Capa</button>
+                        <div id="camera-status-message" class="form-text text-muted"></div>
+                    </div>
+                </div>
+
+                <div id="url-upload-section" class="cover-option-section" style="display: none;">
+                    <label for="cover_url">URL da Imagem:</label>
+                    <input type="url" id="cover_url" name="cover_url" placeholder="http://exemplo.com/capa.jpg">
+                    <button type="button" id="preview-url-btn" class="btn btn-secondary btn-sm" style="margin-top: 5px;">Ver Prévia da URL</button>
+                    <div id="url-status-message" class="form-text text-muted" style="display: none;"></div>
+                </div>
+
+                <div class="image-preview-container" style="margin-top:20px;">
+                    <p>Prévia da Capa:</p>
+                    <img id="cover-preview" src="{{ url_for('static', filename='uploads/default_cover.png') }}" alt="Prévia da Capa" class="default-cover-preview">
+                    <input type="hidden" id="cover_image_data" name="cover_image_data"> {# Para dados da câmera #}
+                    <input type="hidden" id="final_cover_url" name="final_cover_url"> {# Para URL de capa #}
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">Cadastrar Livro</button>
+                <a href="{{ url_for('index') }}" class="btn btn-secondary">Cancelar</a>
+            </div>
+        </form>
+    </section>
+{% endblock %}
+
+{% block scripts_extra %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // --- Elementos do primeiro código (Upload de Capa) ---
+    const coverOptionRadios = document.querySelectorAll('input[name="cover_option"]');
+    const fileUploadSection = document.getElementById('file-upload-section');
+    const cameraUploadSection = document.getElementById('camera-upload-section');
+    const urlUploadSection = document.getElementById('url-upload-section');
+    const coverPreview = document.getElementById('cover-preview');
+    const defaultCoverPath = "{{ url_for('static', filename='uploads/default_cover.png') }}";
+    const coverImageDataInput = document.getElementById('cover_image_data');
+    const finalCoverUrlInput = document.getElementById('final_cover_url');
+
+    const toggleCameraBtn = document.getElementById('toggle-camera-btn');
+    const cameraFeedContainer = document.getElementById('camera-feed-container');
+    const videoElement = document.getElementById('camera-feed');
+    const canvasElement = document.getElementById('snapshot-canvas');
+    const takeSnapshotBtn = document.getElementById('take-snapshot-btn');
+    const cameraStatusMessage = document.getElementById('camera-status-message');
+    let cameraStream;
+
+    const coverFileInput = document.getElementById('cover_file');
+    const coverUrlInput = document.getElementById('cover_url');
+    const previewUrlBtn = document.getElementById('preview-url-btn');
+    const urlStatusMessage = document.getElementById('url-status-message');
+
+    // --- Elementos do segundo código (Câmera Gemini) ---
+    const toggleCameraGeminiBtn = document.getElementById('toggle-camera-gemini-btn');
+    const cameraSectionGemini = document.getElementById('camera-section-gemini');
+    const videoElementGemini = document.getElementById('camera-feed-gemini');
+    const canvasElementGemini = document.getElementById('snapshot-canvas-gemini');
+    const takeSnapshotGeminiBtn = document.getElementById('take-snapshot-gemini-btn');
+    const snapshotPreviewGemini = document.getElementById('snapshot-preview-gemini');
+    const geminiStatusMessage = document.getElementById('gemini-status-message');
+    let cameraStreamGemini;
+
+    // --- Campos do Formulário ---
+    const titleInput = document.getElementById('title');
+    const authorInput = document.getElementById('author');
+    const languageInput = document.getElementById('language');
+    const bookshelfInput = document.getElementById('bookshelf');
+    const shelfInput = document.getElementById('shelf');
+    const genreInput = document.getElementById('genre');
+    const reviewInput = document.getElementById('review');
+    const registerForm = document.getElementById('register-book-form');
+
+    // --- LÓGICA PARA PRÉ-PREENCHIMENTO DE ESTANTE E PRATELEIRA ---
+    if (bookshelfInput && bookshelfInput.value.trim() === '') {
+        const lastUsedBookshelf = localStorage.getItem('lastUsedBookshelf');
+        if (lastUsedBookshelf) {
+            bookshelfInput.value = lastUsedBookshelf;
+        }
+    }
+    if (shelfInput && shelfInput.value.trim() === '') {
+        const lastUsedShelf = localStorage.getItem('lastUsedShelf');
+        if (lastUsedShelf) {
+            shelfInput.value = lastUsedShelf;
+        }
+    }
+    if (registerForm) {
+        registerForm.addEventListener('submit', function() {
+            if (bookshelfInput) {
+                if (bookshelfInput.value.trim() !== '') {
+                    localStorage.setItem('lastUsedBookshelf', bookshelfInput.value.trim());
+                } else {
+                    localStorage.removeItem('lastUsedBookshelf');
+                }
+            }
+            if (shelfInput) {
+                if (shelfInput.value.trim() !== '') {
+                    localStorage.setItem('lastUsedShelf', shelfInput.value.trim());
+                } else {
+                    localStorage.removeItem('lastUsedShelf');
+                }
+            }
+        });
+    }
+
+    // --- Funções de Lógica de Capa (primeiro código) ---
+    function showSelectedCoverOption(option) {
+        fileUploadSection.style.display = 'none';
+        cameraUploadSection.style.display = 'none';
+        urlUploadSection.style.display = 'none';
+
+        // Limpa inputs específicos, exceto se a opção for a relevante
+        if (option !== 'camera') {
+            coverImageDataInput.value = '';
+        }
+        if (option !== 'url') {
+            finalCoverUrlInput.value = '';
+            coverUrlInput.value = '';
+        }
+        if (option !== 'file') {
+            coverFileInput.value = '';
+        }
+
+        // Para a câmera de capa normal (não Gemini)
+        if (cameraStream && option !== 'camera') {
+            cameraStream.getTracks().forEach(track => track.stop());
+            videoElement.srcObject = null;
+            cameraFeedContainer.style.display = 'none';
+            toggleCameraBtn.innerHTML = '<img src="{{ url_for('static', filename='icons/camera.svg') }}" alt="" class="icon"> Ativar Câmera';
+            cameraStatusMessage.textContent = '';
+        }
+
+        // Para a URL
+        if (option !== 'url') {
+            urlStatusMessage.style.display = 'none';
+            urlStatusMessage.textContent = '';
+        }
+
+        // Atualiza a prévia principal da capa
+        if (option === 'camera' && coverImageDataInput.value) {
+            coverPreview.src = coverImageDataInput.value;
+        } else if (option === 'url' && finalCoverUrlInput.value) {
+            coverPreview.src = finalCoverUrlInput.value;
+        } else if (option === 'file' && coverFileInput.files && coverFileInput.files[0]) {
+            // A prévia do arquivo é tratada pelo event listener do input
+        } else {
+            coverPreview.src = defaultCoverPath; // Para 'none' ou se nenhuma imagem estiver pronta
+        }
+
+        // Mostra a seção correta
+        if (option === 'file') {
+            fileUploadSection.style.display = 'block';
+        } else if (option === 'camera') {
+            cameraUploadSection.style.display = 'block';
+        } else if (option === 'url') {
+            urlUploadSection.style.display = 'block';
+        }
+
+        coverFileInput.required = (option === 'file');
+        coverUrlInput.required = (option === 'url');
+    }
+
+    coverOptionRadios.forEach(radio => {
+        radio.addEventListener('change', (event) => {
+            showSelectedCoverOption(event.target.value);
+        });
+    });
+
+    showSelectedCoverOption('none'); // Inicializa com 'none'
+
+    toggleCameraBtn.addEventListener('click', async () => {
+        if (cameraFeedContainer.style.display === 'none') {
+            try {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    alert('Seu navegador não suporta acesso à câmera.');
+                    cameraStatusMessage.textContent = 'Acesso à câmera não suportado.';
+                    return;
+                }
+                cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                videoElement.srcObject = cameraStream;
+                videoElement.play();
+                cameraFeedContainer.style.display = 'block';
+                toggleCameraBtn.innerHTML = '<img src="{{ url_for('static', filename='icons/camera-off.svg') }}" alt="" class="icon"> Fechar Câmera';
+                cameraStatusMessage.textContent = 'Câmera ativa. Aponte para a capa do livro.';
+            } catch (err) {
+                console.error("Erro ao acessar a câmera: ", err);
+                alert('Erro ao acessar a câmera. Verifique as permissões.');
+                cameraStatusMessage.textContent = `Erro ao acessar câmera: ${err.name}.`;
+            }
+        } else {
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(track => track.stop());
+            }
+            videoElement.srcObject = null;
+            cameraFeedContainer.style.display = 'none';
+            toggleCameraBtn.innerHTML = '<img src="{{ url_for('static', filename='icons/camera.svg') }}" alt="" class="icon"> Ativar Câmera';
+            cameraStatusMessage.textContent = '';
+        }
+    });
+
+    takeSnapshotBtn.addEventListener('click', () => {
+        if (!cameraStream || !videoElement.srcObject || videoElement.paused || videoElement.ended || videoElement.readyState < videoElement.HAVE_CURRENT_DATA) {
+            alert("A câmera não está ativa ou pronta.");
+            cameraStatusMessage.textContent = 'Câmera não está pronta.';
+            return;
+        }
+        cameraStatusMessage.textContent = 'Capturando foto da capa...';
+        canvasElement.width = videoElement.videoWidth;
+        canvasElement.height = videoElement.videoHeight;
+        const context = canvasElement.getContext('2d');
+        context.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+        const imageDataUrl = canvasElement.toDataURL('image/jpeg', 0.9);
+
+        coverPreview.src = imageDataUrl;
+        coverImageDataInput.value = imageDataUrl;
+        finalCoverUrlInput.value = '';
+        coverFileInput.value = '';
+        cameraStatusMessage.textContent = 'Foto da capa capturada!';
+    });
+
+    coverFileInput.addEventListener('change', function() {
+        if (this.files && this.files[0]) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                coverPreview.src = e.target.result;
+                coverImageDataInput.value = '';
+                finalCoverUrlInput.value = '';
+            };
+            reader.readAsDataURL(this.files[0]);
+        } else {
+            if(document.querySelector('input[name="cover_option"]:checked').value === 'file'){
+                coverPreview.src = defaultCoverPath;
+            }
+        }
+    });
+
+    previewUrlBtn.addEventListener('click', function() {
+        const url = coverUrlInput.value.trim();
+        if (url) {
+            urlStatusMessage.style.display = 'block';
+            urlStatusMessage.textContent = 'Carregando prévia...';
+            const img = new Image();
+            img.onload = function() {
+                coverPreview.src = url;
+                finalCoverUrlInput.value = url;
+                coverImageDataInput.value = '';
+                urlStatusMessage.textContent = 'Prévia carregada com sucesso.';
+                urlStatusMessage.style.color = '#155724';
+            };
+            img.onerror = function() {
+                coverPreview.src = defaultCoverPath;
+                finalCoverUrlInput.value = '';
+                urlStatusMessage.textContent = 'Erro ao carregar imagem da URL. Verifique o link.';
+                urlStatusMessage.style.color = '#721c24';
+            };
+            img.src = url;
+        } else {
+            coverPreview.src = defaultCoverPath;
+            finalCoverUrlInput.value = '';
+            urlStatusMessage.style.display = 'block';
+            urlStatusMessage.textContent = 'Por favor, insira uma URL.';
+            urlStatusMessage.style.color = '#856404';
+        }
+    });
+
+    coverUrlInput.addEventListener('input', function() {
+        if (document.querySelector('input[name="cover_option"]:checked').value === 'url') {
+            coverPreview.src = defaultCoverPath;
+            finalCoverUrlInput.value = '';
+            urlStatusMessage.style.display = 'none';
+            urlStatusMessage.textContent = '';
+        }
+    });
+
+    // --- Lógica para Câmera Gemini (segundo código) ---
+    toggleCameraGeminiBtn.addEventListener('click', async () => {
+        if (cameraSectionGemini.style.display === 'none') {
+            try {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    alert('Seu navegador não suporta acesso à câmera.');
+                    geminiStatusMessage.textContent = 'Acesso à câmera não suportado.';
+                    return;
+                }
+                cameraStreamGemini = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                videoElementGemini.srcObject = cameraStreamGemini;
+                videoElementGemini.play();
+                cameraSectionGemini.style.display = 'block';
+                toggleCameraGeminiBtn.innerHTML = '<img src="{{ url_for('static', filename='icons/camera-off.svg') }}" alt="" class="icon"> Fechar Câmera de Análise';
+                geminiStatusMessage.textContent = 'Câmera ativa. Aponte para a capa do livro e tire uma foto para análise.';
+            } catch (err) {
+                console.error("Erro ao acessar a câmera Gemini: ", err);
+                alert('Erro ao acessar a câmera. Verifique as permissões.');
+                geminiStatusMessage.textContent = `Erro ao acessar câmera: ${err.name}.`;
+            }
+        } else {
+            if (cameraStreamGemini) {
+                cameraStreamGemini.getTracks().forEach(track => track.stop());
+            }
+            videoElementGemini.srcObject = null;
+            cameraSectionGemini.style.display = 'none';
+            toggleCameraGeminiBtn.innerHTML = '<img src="{{ url_for('static', filename='icons/camera.svg') }}" alt="" class="icon"> Fotografe a Capa do Livro';
+            geminiStatusMessage.textContent = '';
+            snapshotPreviewGemini.style.display = 'none';
+            snapshotPreviewGemini.src = '#';
+        }
+    });
+
+    takeSnapshotGeminiBtn.addEventListener('click', async () => {
+        if (!cameraStreamGemini || !videoElementGemini.srcObject || videoElementGemini.paused || videoElementGemini.ended || videoElementGemini.readyState < videoElementGemini.HAVE_CURRENT_DATA) {
+            alert("A câmera de análise não está ativa ou pronta.");
+            geminiStatusMessage.textContent = 'Câmera de análise não está pronta.';
+            return;
+        }
+
+        geminiStatusMessage.textContent = 'Capturando foto para análise...';
+        canvasElementGemini.width = videoElementGemini.videoWidth;
+        canvasElementGemini.height = videoElementGemini.videoHeight;
+        const context = canvasElementGemini.getContext('2d');
+        context.drawImage(videoElementGemini, 0, 0, canvasElementGemini.width, canvasElementGemini.height);
+
+        const imageDataUrl = canvasElementGemini.toDataURL('image/jpeg', 0.9);
+        snapshotPreviewGemini.src = imageDataUrl;
+        snapshotPreviewGemini.style.display = 'block';
+
+        // --- MODIFICAÇÃO: Usar foto do Gemini como capa ---
+        coverPreview.src = imageDataUrl; // Atualiza a prévia principal da capa
+        coverImageDataInput.value = imageDataUrl; // Define o valor para o input hidden da câmera
+        finalCoverUrlInput.value = ''; // Limpa outras opções de capa (URL)
+        coverFileInput.value = '';   // Limpa outras opções de capa (Arquivo)
+
+        // Seleciona a opção de rádio "Tirar foto (câmera)"
+        const cameraRadio = document.querySelector('input[name="cover_option"][value="camera"]');
+        if (cameraRadio) {
+            cameraRadio.checked = true;
+        }
+        // Atualiza a UI das opções de capa para refletir a seleção da câmera
+        showSelectedCoverOption('camera');
+        // --- FIM DA MODIFICAÇÃO ---
+
+        geminiStatusMessage.textContent = 'Foto capturada e definida como capa. Enviando para análise do Gemini...'; // Mensagem atualizada
+
+        try {
+            const blob = await (await fetch(imageDataUrl)).blob();
+            const formData = new FormData();
+            formData.append('image_data', blob, 'cover_snapshot.jpeg');
+
+            const response = await fetch("{{ url_for('analyze_cover_with_gemini') }}", {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Erro HTTP: ${response.status} - ${errorText}`);
+            }
+
+            const data = await response.json();
+            console.log("Resposta do Gemini:", data);
+
+            titleInput.value = data.title || '';
+            authorInput.value = data.author || '';
+            languageInput.value = data.language || '';
+            genreInput.value = data.genre || '';
+            reviewInput.value = data.review || '';
+
+            geminiStatusMessage.textContent = 'Informações preenchidas pelo Gemini e foto definida como capa!';
+            geminiStatusMessage.style.color = '#155724';
+
+        } catch (error) {
+            console.error('Erro ao analisar capa com Gemini:', error);
+            geminiStatusMessage.textContent = `Erro ao analisar capa: ${error.message}. A foto ainda foi definida como capa.`;
+            geminiStatusMessage.style.color = '#721c24';
+        }
+    });
+
+    // --- Manipulação do Submit do Formulário (Lógica de capa) ---
+    if (registerForm) {
+        registerForm.addEventListener('submit', function(event) {
+            const selectedOption = document.querySelector('input[name="cover_option"]:checked').value;
+
+            // Limpa inputs não relevantes para a opção selecionada
+            if (selectedOption !== 'file') {
+                coverFileInput.value = '';
+            }
+            if (selectedOption !== 'camera') {
+                coverImageDataInput.value = '';
+            }
+            if (selectedOption !== 'url') {
+                finalCoverUrlInput.value = '';
+                coverUrlInput.value = '';
+            }
+            // Se 'none' for selecionado, todos os campos de upload de capa devem ser limpos
+            if (selectedOption === 'none') {
+                coverFileInput.value = '';
+                coverImageDataInput.value = '';
+                finalCoverUrlInput.value = '';
+                coverUrlInput.value = '';
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

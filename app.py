@@ -1,500 +1,825 @@
 import os
-import json
+import uuid
 import base64
-from datetime import datetime  # Para nomes de arquivos únicos
-
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory
-from flask_sqlalchemy import SQLAlchemy
+import requests
+import logging
+import json
+import mimetypes  # Novo import para detecção de tipo MIME
+import re  # Novo import para expressões regulares, caso o JSON do Gemini falhe
+from datetime import datetime
+from pathlib import Path  # Novo import para manipulação de caminhos
+from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, current_app
 from werkzeug.utils import secure_filename
-
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import distinct, and_, or_
 import google.generativeai as genai
+import shutil
 
-# Importa a configuração e o modelo do banco de dados
-from config import Config
-from models import db, Livro
+# --- Configuração do Gemini ---
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
-# Inicializa o aplicativo Flask
+# Configuração de logging (garante que esteja configurado globalmente desde o início)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+if not GOOGLE_API_KEY:
+    logging.error("A variável de ambiente GOOGLE_API_KEY não está configurada. O serviço Gemini não funcionará.")
+    # Não levantamos ValueError aqui para permitir que a aplicação continue funcionando sem o Gemini
+    model = None
+else:
+    try:
+        genai.configure(api_key=GOOGLE_API_KEY)
+        # Usando 'gemini-1.5-flash' como um modelo mais estável e com custo-benefício.
+        # 'gemini-2.0-flash' pode não ser um nome de modelo válido ou ser muito recente.
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        logging.info("Modelo Gemini configurado com sucesso.")
+    except Exception as e:
+        logging.error(f"Erro ao inicializar o modelo Gemini: {e}")
+        model = None  # Define model como None se houver falha
+        logging.warning("API Key do Gemini encontrada, mas o serviço de análise de capa não pôde ser inicializado.")
+
+# --- Configuração da Aplicação ---
 app = Flask(__name__)
-# Carrega as configurações do arquivo Config
-app.config.from_object(Config)
 
-# Inicializa o banco de dados com o aplicativo Flask
-db.init_app(app)
+# Gerar uma chave secreta forte se não estiver definida como variável de ambiente
+# ESSENCIAL para segurança em produção!
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", os.urandom(24))
+if not os.environ.get("FLASK_SECRET_KEY"):
+    logging.warning("FLASK_SECRET_KEY não definida como variável de ambiente. Usando chave gerada aleatoriamente. "
+                    "Para produção, defina uma chave persistente e segura.")
 
-# Configura a chave da API do Gemini
-genai.configure(api_key=app.config['GEMINI_API_KEY'])
+# Define o caminho para a pasta de uploads
+BASE_DIR = Path(os.path.abspath(os.path.dirname(__file__)))  # <<--- MODIFICADO: Usando Pathlib
+UPLOAD_FOLDER = BASE_DIR / 'static' / 'uploads'  # <<----------------- MODIFICADO: Usando Pathlib
+BACKUP_FOLDER = BASE_DIR / 'backups'  # <<--------------------------- ADICIONADO: Pasta para backups do DB
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+
+app.config['UPLOAD_FOLDER'] = str(UPLOAD_FOLDER)  # <<----------------- MODIFICADO: Convertendo Path para str
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + str(BASE_DIR / 'library.db')  # <- MODIFICADO para Pathlib
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['DB_CHANGES_COUNT'] = 0  # <<----------------------------- ADICIONADO: Contador para backups
+app.config['DB_BACKUP_THRESHOLD'] = 5  # <<--------------------------- ADICIONADO: Limite para acionar backup
+
+db = SQLAlchemy(app)
+
+# Garante que as pastas de uploads e backups existam
+for folder_path in [UPLOAD_FOLDER, BACKUP_FOLDER]:  # <<------------- MODIFICADO: Loop para criar pastas
+    if not folder_path.exists():
+        try:
+            folder_path.mkdir(parents=True, exist_ok=True)  # Garante criação de pais se necessário
+            logging.info(f"Pasta criada: {folder_path}")
+        except OSError as e:
+            logging.critical(f"Erro CRÍTICO ao criar pasta {folder_path}: {e}")
 
 
-# --- Funções Auxiliares ---
+# --- Modelo do Banco de Dados ---
+class Book(db.Model):
+    __tablename__ = 'books'
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    title = db.Column(db.String(255), nullable=False)
+    author = db.Column(db.String(255), nullable=False)
+    genre = db.Column(db.String(100))
+    language = db.Column(db.String(50))
+    shelf = db.Column(db.String(100))
+    bookshelf = db.Column(db.String(100))
+    review = db.Column(db.Text)
+    cover_path = db.Column(db.String(255))  # Caminho relativo da capa (ex: 'uploads/nome_arquivo.jpg')
 
+    def __repr__(self):
+        return f"<Book {self.title} by {self.author}>"
+
+
+# <<------------------------------------------------------------------------>>
+# <<---------------------- INÍCIO: FUNÇÕES DE BACKUP ----------------------->>
+# <<------------------------------------------------------------------------>>
+def backup_database():
+    """Cria um backup do arquivo do banco de dados."""
+    source_db_uri = app.config['SQLALCHEMY_DATABASE_URI']
+    # Garante que estamos lidando com SQLite local
+    if not source_db_uri.startswith('sqlite:///'):
+        logging.error("Backup atualmente suportado apenas para URIs 'sqlite:///'.")
+        return
+
+    source_db_path_str = source_db_uri.replace('sqlite:///', '')
+    source_db_path = Path(source_db_path_str)
+
+    if not source_db_path.is_file():  # Verifica se é um arquivo e existe
+        logging.error(f"Arquivo do banco de dados não encontrado em {source_db_path} para backup.")
+        return
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_filename = f"library_backup_{timestamp}.db"
+    backup_filepath = BACKUP_FOLDER / backup_filename
+
+    try:
+        shutil.copy2(source_db_path, backup_filepath)
+        logging.info(f"Backup do banco de dados criado com sucesso: {backup_filepath}")
+    except Exception as e:
+        logging.error(f"Erro ao criar backup do banco de dados: {e}", exc_info=True)
+
+
+def check_and_perform_backup():
+    """Verifica o contador de alterações e realiza backup se necessário."""
+    app.config['DB_CHANGES_COUNT'] += 1
+    logging.debug(f"Contador de alterações do DB: {app.config['DB_CHANGES_COUNT']}")
+    # Usa app.config.get para o threshold, com um fallback para garantir que funcione
+    if app.config['DB_CHANGES_COUNT'] >= app.config.get('DB_BACKUP_THRESHOLD', 5):
+        logging.info("Contador de alterações atingiu o limite. Iniciando backup...")
+        backup_database()
+        app.config['DB_CHANGES_COUNT'] = 0  # Reseta o contador
+
+
+# <<------------------------------------------------------------------------>>
+# <<------------------------ FIM: FUNÇÕES DE BACKUP ------------------------>>
+# <<------------------------------------------------------------------------>>
+
+
+# --- Funções Auxiliares de Capa ---
 def allowed_file(filename):
-    """Verifica se a extensão do arquivo é permitida."""
+    """Verifica se o arquivo tem uma extensão permitida."""
+    if not filename:
+        return False
     return '.' in filename and \
-        filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+        filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def delete_local_cover_file(filename):
-    """Deleta um arquivo de capa local se ele existir e não for uma URL ou base64."""
-    if filename and not filename.startswith('http') and not filename.startswith('data:image'):
-        full_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        if os.path.exists(full_path):
+def save_image_from_file(file_storage):  # Renomeado parâmetro para clareza
+    if not file_storage or file_storage.filename == '': return None
+    if not allowed_file(file_storage.filename):
+        logging.warning(f"Tipo de arquivo não permitido para '{file_storage.filename}'.")
+        return None
+    try:
+        extension = file_storage.filename.rsplit('.', 1)[1].lower()
+        unique_filename = f"{uuid.uuid4().hex}.{extension}"
+        filepath = UPLOAD_FOLDER / unique_filename  # Usando Pathlib
+        file_storage.save(filepath)
+        logging.info(f"Arquivo salvo: {filepath}")
+        return (Path('uploads') / unique_filename).as_posix()  # Caminho relativo para DB/HTML
+    except Exception as e:
+        logging.error(f"Erro ao salvar arquivo '{file_storage.filename}': {e}", exc_info=True)
+        return None
+
+
+def save_image_from_base64(base64_string):
+    if not base64_string: return None
+    try:
+        if ',' not in base64_string:
+            logging.error("String Base64 não contém 'data:...' header.")
+            return None
+        header, encoded_data = base64_string.split(',', 1)
+        mime_type = header.split(';')[0].split(':')[1] if ':' in header else 'application/octet-stream'
+        extension = mimetypes.guess_extension(mime_type) or '.jpeg'  # Fallback
+        extension = extension.lstrip('.')  # Remove o ponto se presente
+        if extension not in ALLOWED_EXTENSIONS:
+            logging.warning(f"Extensão '{extension}' (de {mime_type}) não permitida via Base64.")
+            return None
+        unique_filename = f"{uuid.uuid4().hex}.{extension}"
+        filepath = UPLOAD_FOLDER / unique_filename  # Usando Pathlib
+        decoded_data = base64.b64decode(encoded_data)
+        with open(filepath, "wb") as fh:
+            fh.write(decoded_data)
+        logging.info(f"Imagem Base64 salva: {filepath}")
+        return (Path('uploads') / unique_filename).as_posix()
+    except Exception as e:
+        logging.error(f"Erro ao salvar imagem Base64: {e}", exc_info=True)
+        return None
+
+
+def save_image_from_url(image_url):
+    if not image_url: return None
+    try:
+        response = requests.get(image_url, stream=True, timeout=10)
+        response.raise_for_status()
+        content_type = response.headers.get('Content-Type', '').lower()
+        extension = mimetypes.guess_extension(content_type) or '.jpg'  # Fallback
+        extension = extension.lstrip('.')
+        if extension not in ALLOWED_EXTENSIONS:
+            logging.warning(f"Extensão '{extension}' (de {content_type}) não permitida via URL.")
+            return None
+        unique_filename = f"{uuid.uuid4().hex}.{extension}"
+        filepath = UPLOAD_FOLDER / unique_filename  # Usando Pathlib
+        with open(filepath, 'wb') as out_file:
+            for chunk in response.iter_content(chunk_size=8192):
+                out_file.write(chunk)
+        logging.info(f"Imagem da URL salva: {filepath}")
+        return (Path('uploads') / unique_filename).as_posix()
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Erro ao baixar imagem da URL '{image_url}': {e}")
+        return None
+    except Exception as e:
+        logging.error(f"Erro ao processar URL '{image_url}': {e}", exc_info=True)
+        return None
+
+
+def delete_existing_cover(book_cover_path):
+    default_cover_rel_path = (Path('uploads') / 'default_cover.png').as_posix()
+    if book_cover_path and book_cover_path != default_cover_rel_path:
+        full_filepath = Path(app.static_folder) / book_cover_path  # Usando Pathlib
+        if full_filepath.exists() and full_filepath.is_file():  # Verifica se existe e é arquivo
             try:
-                os.remove(full_path)
-                app.logger.info(f"Capa local antiga deletada: {full_path}")
+                full_filepath.unlink()  # Método de Pathlib para remover arquivo
+                logging.info(f"Capa antiga removida: {full_filepath}")
             except OSError as e:
-                app.logger.error(f"Erro ao deletar capa local antiga {full_path}: {e}")
+                logging.error(f"Erro ao remover capa antiga {full_filepath}: {e}", exc_info=True)
+        else:
+            logging.debug(f"Capa antiga não encontrada para exclusão ou não é arquivo: {full_filepath}")
 
 
-# --- Rotas ---
+def process_cover_options(book, request_form, request_files):
+    """
+    Processa as opções de capa e atualiza o caminho da capa do livro.
+    Retorna o novo caminho da capa ou None se a capa deve ser mantida ou removida.
+    """
+    cover_option = request_form.get('cover_option')
+    new_cover_path = book.cover_path  # Começa assumindo que a capa será mantida
 
-@app.route('/uploads/<filename>')
-def uploaded_file(filename):
-    """Serve arquivos da pasta de uploads."""
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+    if cover_option == 'file':
+        cover_file = request_files.get('cover_file')
+        if cover_file and cover_file.filename != '':
+            # Lógica para salvar o arquivo e obter o new_cover_path
+            # Exemplo: new_cover_path = save_uploaded_file(cover_file, app.config['UPLOAD_FOLDER'])
+            pass  # Substitua pelo seu código de salvamento de arquivo
+        # Se nenhum arquivo for enviado, mas 'file' foi selecionado,
+        # pode-se optar por manter a capa atual ou usar a padrão.
+        # Para este caso, se 'file' é selecionado mas nenhum arquivo é enviado,
+        # vamos assumir que o usuário não quis mudar, então new_cover_path permanece book.cover_path.
+        # Se quisesse forçar a padrão, seria: new_cover_path = 'uploads/default_cover.png'
+
+    elif cover_option == 'camera':
+        image_data = request_form.get('cover_image_data')
+        if image_data:
+            # Lógica para salvar a imagem da câmera e obter o new_cover_path
+            # Exemplo: new_cover_path = save_base64_image(image_data, app.config['UPLOAD_FOLDER'])
+            pass  # Substitua pelo seu código de salvamento de imagem base64
+
+    elif cover_option == 'url':
+        cover_url = request_form.get('final_cover_url')  # Usar final_cover_url que é validado no JS
+        if cover_url:
+            # Lógica para baixar a imagem da URL, salvar e obter o new_cover_path
+            # Exemplo: new_cover_path = download_and_save_image_from_url(cover_url, app.config['UPLOAD_FOLDER'])
+            pass  # Substitua pelo seu código de download e salvamento
+
+    elif cover_option == 'current':
+        # Se a opção é 'current', explicitamente não fazemos nada,
+        # new_cover_path já foi inicializado com book.cover_path.
+        pass
+
+    # Se a opção 'none' fosse reintroduzida no HTML:
+    # elif cover_option == 'none':
+    #     new_cover_path = None # Ou 'uploads/default_cover.png'
+
+    # Opcional: Deletar a capa antiga se uma nova foi definida e a antiga não é a padrão
+    # if new_cover_path != book.cover_path and book.cover_path and book.cover_path != 'uploads/default_cover.png':
+    #     try:
+    #         old_file_full_path = os.path.join(app.config['UPLOAD_FOLDER'], os.path.basename(book.cover_path))
+    #         if os.path.exists(old_file_full_path):
+    #             os.remove(old_file_full_path)
+    #     except Exception as e:
+    #         print(f"Erro ao deletar capa antiga: {e}")
+
+    return new_cover_path
 
 
 @app.route('/')
 def index():
-    """Exibe a lista de livros, com opções de ordenação e filtro."""
-    sort_by = request.args.get('sort_by', 'titulo')
-    genre_filter = request.args.get('genero')
-    language_filter = request.args.get('idioma')
+    query_term = request.args.get('query', '')
+    selected_language = request.args.get('language_filter', '')
+    selected_genre = request.args.get('genre_filter', '')
+    selected_bookshelf = request.args.get('bookshelf_filter', '')
+    selected_shelf = request.args.get('shelf_filter', '')
 
-    query = Livro.query
+    # Obter opções distintas para os filtros (seu código existente aqui)
+    all_languages = [
+        lang[0] for lang in db.session.query(distinct(Book.language))
+        .filter(Book.language.isnot(None), Book.language != '')
+        .order_by(Book.language).all()
+    ]
+    all_genres = [
+        genre[0] for genre in db.session.query(distinct(Book.genre))
+        .filter(Book.genre.isnot(None), Book.genre != '')
+        .order_by(Book.genre).all()
+    ]
+    all_bookshelves = [
+        bs[0] for bs in db.session.query(distinct(Book.bookshelf))
+        .filter(Book.bookshelf.isnot(None), Book.bookshelf != '')
+        .order_by(Book.bookshelf).all()
+    ]
+    all_shelves = [
+        sh[0] for sh in db.session.query(distinct(Book.shelf))
+        .filter(Book.shelf.isnot(None), Book.shelf != '')
+        .order_by(Book.shelf).all()
+    ]
 
-    if genre_filter:
-        query = query.filter(Livro.genero.ilike(f'%{genre_filter}%'))
-    if language_filter:
-        query = query.filter(Livro.idioma.ilike(f'%{language_filter}%'))
+    query_obj = Book.query
+    filter_conditions = []
 
-    if sort_by == 'autor':
-        livros = query.order_by(Livro.autor).all()
-    else:
-        livros = query.order_by(Livro.titulo).all()
-
-    generos_unicos = sorted(list(set(livro.genero for livro in Livro.query.filter(Livro.genero.isnot(None)).all())))
-    idiomas_unicos = sorted(list(set(livro.idioma for livro in Livro.query.filter(Livro.idioma.isnot(None)).all())))
-
-    return render_template('index.html', livros=livros,
-                           generos_unicos=generos_unicos,
-                           idiomas_unicos=idiomas_unicos,
-                           selected_genre=genre_filter,
-                           selected_language=language_filter)
-
-
-@app.route('/book/<int:book_id>')
-def book_detail(book_id):
-    """Exibe os detalhes de um livro específico."""
-    book = Livro.query.get_or_404(book_id)
-    return render_template('book_detail.html', book=book)
-
-
-@app.route('/add_book', methods=['GET', 'POST'])
-def add_book():
-    """Adiciona um novo livro ao banco de dados."""
-    if request.method == 'POST':
-        # Coleta os dados do formulário
-        titulo = request.form['titulo']
-        autor = request.form['autor']
-        genero = request.form.get('genero')
-        idioma = request.form.get('idioma')
-        resenha = request.form.get('resenha')
-        estante = request.form.get('estante')
-        prateleira = request.form.get('prateleira')
-
-        capa_path = None  # Inicializa o caminho da capa como None
-
-        cover_option = request.form.get('cover_option')
-
-        # Lida com a capa com base na opção selecionada
-        if cover_option == 'file':
-            if 'capa_file' in request.files and request.files['capa_file'].filename:
-                file = request.files['capa_file']
-                if allowed_file(file.filename):
-                    filename = secure_filename(file.filename)
-                    file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-                    capa_path = filename  # Armazena apenas o nome do arquivo no DB
-                else:
-                    flash(f'Tipo de arquivo não permitido para {file.filename}', 'danger')
-
-        elif cover_option == 'camera':
-            if request.form.get('capa_camera_data'):
-                data_url = request.form.get('capa_camera_data')
-                if data_url.startswith('data:image'):
-                    try:
-                        header, encoded = data_url.split(",", 1)
-                        data = base64.b64decode(encoded)
-                        # Gerar nome de arquivo único
-                        filename = secure_filename(f"camera_upload_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.png")
-                        file_save_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                        with open(file_save_path, "wb") as fh:
-                            fh.write(data)
-                        capa_path = filename  # Armazena apenas o nome do arquivo
-                    except Exception as e:
-                        flash(f'Erro ao processar dados da câmera: {e}', 'danger')
-                else:
-                    flash('Dados da imagem da câmera inválidos.', 'danger')
-
-        elif cover_option == 'url':
-            if request.form.get('capa_url'):
-                capa_path = request.form.get('capa_url')
-                # Por enquanto, apenas armazena a URL. Baixar a imagem exigiria mais lógica.
-                flash('Download de imagem por URL não implementado; apenas a URL foi salva.', 'warning')
-
-        # Se 'none' for selecionado, 'capa_path' permanece None.
-
-        new_book = Livro(
-            titulo=titulo,
-            autor=autor,
-            genero=genero,
-            idioma=idioma,
-            resenha=resenha,
-            capa=capa_path,  # Será None se nenhuma opção de capa válida for selecionada
-            estante=estante,
-            prateleira=prateleira
+    if query_term:
+        filter_conditions.append(
+            or_(
+                Book.title.ilike(f'%{query_term}%'),
+                Book.author.ilike(f'%{query_term}%')
+            )
         )
-        db.session.add(new_book)
-        db.session.commit()
-        flash('Livro adicionado com sucesso!', 'success')
-        return redirect(url_for('index'))
-    return render_template('book_form.html')
+
+    if selected_language:
+        filter_conditions.append(Book.language == selected_language)
+    if selected_genre:
+        filter_conditions.append(Book.genre == selected_genre)
+    if selected_bookshelf:
+        filter_conditions.append(Book.bookshelf == selected_bookshelf)
+    if selected_shelf:
+        filter_conditions.append(Book.shelf == selected_shelf)
+
+    if filter_conditions:
+        query_obj = query_obj.filter(and_(*filter_conditions))
+
+    # Contar quantos livros correspondem aos filtros ANTES de aplicar ordenação e .all()
+    count_matching_books = query_obj.count()
+
+    # Obter os livros para exibição (já filtrados)
+    #books_for_display = query_obj.order_by(Book.title).all()
+    books_for_display = query_obj.order_by(Book.id.desc()).limit(50).all()
+
+    # Contagem total de livros cadastrados (para exibir o total geral)
+    total_books_registered = Book.query.count()
+
+    return render_template('index.html',
+                           books=books_for_display,
+                           query=query_term,
+                           all_languages=all_languages,
+                           selected_language=selected_language,
+                           all_genres=all_genres,
+                           selected_genre=selected_genre,
+                           all_bookshelves=all_bookshelves,
+                           selected_bookshelf=selected_bookshelf,
+                           all_shelves=all_shelves,
+                           selected_shelf=selected_shelf,
+                           total_books_registered=total_books_registered,  # Contagem total de todos os livros
+                           count_matching_books=count_matching_books)  # Contagem de livros que atendem aos filtros
 
 
-@app.route('/edit_book/<int:book_id>', methods=['GET', 'POST'])
-def edit_book(book_id):
-    """Edita um livro existente no banco de dados."""
-    book = Livro.query.get_or_404(book_id)
-    old_capa_filename = book.capa  # Guarda o nome do arquivo da capa antiga (ou URL/base64)
-
+@app.route('/register', methods=['GET', 'POST'])
+def register_book():
+    """Lida com o cadastro de novos livros."""
     if request.method == 'POST':
-        # Atualiza os campos do livro
-        book.titulo = request.form['titulo']
-        book.autor = request.form['autor']
-        book.genero = request.form.get('genero')
-        book.idioma = request.form.get('idioma')
-        book.resenha = request.form.get('resenha')
-        book.estante = request.form.get('estante')
-        book.prateleira = request.form.get('prateleira')
-
-        new_capa_path = old_capa_filename  # Padrão: mantém a capa atual se nada mudar
+        title = request.form.get('title')
+        author = request.form.get('author')
+        language = request.form.get('language')
+        shelf = request.form.get('shelf')
+        bookshelf = request.form.get('bookshelf')
+        genre = request.form.get('genre')
+        review = request.form.get('review')
 
         cover_option = request.form.get('cover_option')
+        cover_path_for_db = None
 
-        # Flag para indicar se a capa local antiga deve ser deletada
-        should_delete_old_local_cover = False
+        if not all([title, author]):
+            flash('Título e Autor são campos obrigatórios.', 'error')
+            return render_template('register.html', form_data=request.form)
 
         if cover_option == 'file':
-            if 'capa_file' in request.files and request.files['capa_file'].filename:
-                file = request.files['capa_file']
-                if allowed_file(file.filename):
-                    should_delete_old_local_cover = True  # Nova imagem, então deletar a antiga
-                    filename = secure_filename(file.filename)
-                    file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-                    new_capa_path = filename  # Armazena o nome do arquivo
-                else:
-                    flash(f'Tipo de arquivo não permitido para {file.filename}', 'danger')
-                    # Se o upload falhar, mantém a capa antiga
-                    new_capa_path = old_capa_filename
-            else:  # Opção 'file' selecionada, mas nenhum arquivo enviado (limpa capa)
-                should_delete_old_local_cover = True
-                new_capa_path = None
+            cover_image_file = request.files.get('cover_file')
+            if cover_image_file and cover_image_file.filename != '':
+                cover_path_for_db = save_image_from_file(cover_image_file)
+                if not cover_path_for_db:
+                    flash('Erro ao carregar imagem do arquivo. Verifique o tipo de arquivo.', 'error')
+                    return render_template('register.html', form_data=request.form)
+            else:
+                logging.debug("Opção 'file' selecionada, mas nenhum arquivo foi fornecido para registro.")
 
         elif cover_option == 'camera':
-            if request.form.get('capa_camera_data'):
-                data_url = request.form.get('capa_camera_data')
-                if data_url.startswith('data:image'):
-                    try:
-                        should_delete_old_local_cover = True  # Nova imagem da câmera, deletar a antiga
-                        header, encoded = data_url.split(",", 1)
-                        data = base64.b64decode(encoded)
-                        filename = secure_filename(f"camera_upload_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.png")
-                        file_save_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                        with open(file_save_path, "wb") as fh:
-                            fh.write(data)
-                        new_capa_path = filename  # Armazena o nome do arquivo
-                    except Exception as e:
-                        flash(f'Erro ao processar dados da câmera: {e}', 'danger')
-                        new_capa_path = old_capa_filename  # Reverte para a capa antiga se houver erro
-                else:
-                    flash('Dados da imagem da câmera inválidos.', 'danger')
-                    new_capa_path = old_capa_filename  # Reverte para a capa antiga se houver erro
-            else:  # Opção 'camera' selecionada, mas sem dados (limpa capa)
-                should_delete_old_local_cover = True
-                new_capa_path = None
+            cover_image_data = request.form.get('cover_image_data')
+            if cover_image_data:
+                cover_path_for_db = save_image_from_base64(cover_image_data)
+                if not cover_path_for_db:
+                    flash('Erro ao salvar imagem da câmera. Tente novamente.', 'error')
+                    return render_template('register.html', form_data=request.form)
+            else:
+                logging.debug("Opção 'camera' selecionada, mas dados da câmera estão vazios para registro.")
 
         elif cover_option == 'url':
-            if request.form.get('capa_url'):
-                should_delete_old_local_cover = True  # Nova URL, deletar a antiga
-                new_capa_path = request.form.get('capa_url')
-                flash('Download de imagem por URL não implementado; apenas a URL foi salva.', 'warning')
-            else:  # Opção 'url' selecionada, mas sem URL (limpa capa)
-                should_delete_old_local_cover = True
-                new_capa_path = None
-
-        elif cover_option == 'none':
-            # O usuário escolheu explicitamente 'Nenhuma'
-            should_delete_old_local_cover = True  # Deletar capa local antiga
-            new_capa_path = None  # Definir como None no DB
-
-        elif cover_option == 'current_camera':
-            # O usuário escolheu manter a imagem da câmera base64 atual.
-            # O campo 'capa_camera_data' conterá o valor se for uma edição de um livro com capa de câmera.
-            data_url = request.form.get('capa_camera_data')
-            if data_url and data_url.startswith('data:image'):
-                new_capa_path = data_url  # Mantém a string base64 se for válida
+            final_cover_url = request.form.get('final_cover_url')
+            if final_cover_url:
+                cover_path_for_db = save_image_from_url(final_cover_url)
+                if not cover_path_for_db:
+                    flash('Erro ao carregar imagem da URL. Verifique o link ou a conexão.', 'error')
+                    return render_template('register.html', form_data=request.form)
             else:
-                new_capa_path = None  # Se os dados forem inválidos, limpa a capa
-                should_delete_old_local_cover = True  # Se a capa era um arquivo, deleta
+                logging.debug("Opção 'url' selecionada, mas a URL final está vazia para registro.")
+        # Se 'none' ou 'keep_current' for selecionado, cover_path_for_db permanece None ou o valor existente, que é o desejado.
 
-        # Lógica para "Manter Capa Atual" se nenhuma opção de capa explícita foi selecionada
-        # Ou se a opção "none" ou "current_camera" foi selecionada no JS mas não havia capa antiga
-        if request.form.get('keep_current_cover') == 'true' and new_capa_path is None:
-            new_capa_path = old_capa_filename
-            should_delete_old_local_cover = False  # Não deletar se estamos mantendo
+        new_book = Book(
+            title=title,
+            author=author,
+            language=language,
+            genre=genre,
+            shelf=shelf,
+            bookshelf=bookshelf,
+            review=review,
+            cover_path=cover_path_for_db
+        )
 
-        # Executa a deleção do arquivo físico antigo, se necessário
-        # Só deleta se o old_capa_filename existia e era um arquivo local, E
-        # se uma nova opção o substitui OU 'none' foi selecionado, E
-        # se o nome da capa antiga for diferente do novo (evita deletar o mesmo arquivo)
-        if should_delete_old_local_cover and old_capa_filename \
-                and not old_capa_filename.startswith('http') \
-                and not old_capa_filename.startswith('data:image') \
-                and old_capa_filename != new_capa_path:  # Verifica se é um arquivo local e diferente
-            delete_local_cover_file(old_capa_filename)
+        db.session.add(new_book)
+        try:
+            db.session.commit()
+            flash('Livro cadastrado com sucesso!', 'success')
+            check_and_perform_backup()
+            return redirect(url_for('index'))
+        except Exception as e:
+            db.session.rollback()  # Em caso de erro, desfaz a transação
+            flash(f'Erro ao cadastrar livro: {e}', 'error')
+            logging.error(f"Erro ao adicionar novo livro: {e}", exc_info=True)
+            return render_template('register.html', form_data=request.form)
 
-        book.capa = new_capa_path  # Atualiza o campo 'capa' do livro
-
-        db.session.commit()
-        flash('Livro atualizado com sucesso!', 'success')
-        return redirect(url_for('book_detail', book_id=book.id))
-    return render_template('book_form.html', book=book)
+    return render_template('register.html', form_data={})
 
 
-@app.route('/delete_book/<int:book_id>', methods=['GET', 'POST'])
+@app.route('/analyze_cover_via_gemini', methods=['POST'])
+def analyze_cover_with_gemini():
+    """
+    Endpoint para receber uma imagem (da câmera), enviá-la ao Gemini,
+    e retornar informações extraídas do livro.
+    """
+    if not model:
+        current_app.logger.warning(
+            "Serviço Gemini não está disponível devido à falta de API Key ou erro de inicialização.")
+        return jsonify({"error": "Serviço de análise de capa indisponível."}), 503
+
+    if 'image_data' not in request.files:
+        current_app.logger.error("Nenhuma imagem recebida em /analyze_cover_via_gemini")
+        return jsonify({"error": "Nenhuma imagem recebida."}), 400
+
+    image_file = request.files['image_data']
+    current_app.logger.info(f"Recebida imagem para análise: {image_file.filename}")
+
+    try:
+        image_bytes = image_file.read()
+        # Tenta inferir o tipo MIME real do arquivo, fallback para JPEG
+        mime_type = image_file.mimetype if image_file.mimetype else "image/jpeg"
+
+        image_part = {"mime_type": mime_type, "data": image_bytes}
+
+        prompt = '''
+            A partir da imagem fornecida, obtenha os dados do livro: título, autor, gênero, idioma.
+            Busque na internet uma breve resenha do livro. Adicione após a resenha uma nota, numa linha abaixo: --- Resenha gerada por IA.---
+            Retorne os dados estritamente no formato JSON, sem texto adicional antes ou depois do JSON.
+            Com exceção do título e do autor, escreva em portuguÊs.
+    
+            Exemplo de formato esperado:
+            ```json
+            {
+                "title": "Título do Livro",
+                "author": "Nome do Autor",
+                "genre": "Gênero do Livro (Ex: Ficção Científica, Romance, Fantasia)",
+                "language": "Idioma do Livro (Ex: Português, Inglês)",
+                "review": "Uma breve resenha do livro, contendo um resumo e principais temas."
+            }
+            ```
+            '''
+
+        # Solicita explicitamente uma resposta JSON para o Gemini
+        response = model.generate_content(
+            [prompt, image_part],
+            stream=False,
+            generation_config={"response_mime_type": "application/json"}
+        )
+
+        gemini_output = response.text
+        logging.debug(f"Resposta Gemini crua: {gemini_output}")
+
+        extracted_data = {}
+        try:
+            parsed_json = json.loads(gemini_output)
+            extracted_data["title"] = parsed_json.get("title", "")
+            extracted_data["author"] = parsed_json.get("author", "")
+            extracted_data["language"] = parsed_json.get("language", "")
+            extracted_data["genre"] = parsed_json.get("genre", "")
+            extracted_data["review"] = parsed_json.get("review", "")
+        except json.JSONDecodeError as e:
+            logging.error(
+                f"Resposta do Gemini não é um JSON válido: {e}. Tentando parsear com regex. Resposta: {gemini_output}",
+                exc_info=True)
+            # Fallback mais robusto usando regex para extração de dados individuais
+            extracted_data["title"] = re.search(r'"title":\s*"(.*?)"', gemini_output, re.DOTALL).group(1) if re.search(
+                r'"title":\s*"(.*?)"', gemini_output, re.DOTALL) else ""
+            extracted_data["author"] = re.search(r'"author":\s*"(.*?)"', gemini_output, re.DOTALL).group(
+                1) if re.search(r'"author":\s*"(.*?)"', gemini_output, re.DOTALL) else ""
+            extracted_data["genre"] = re.search(r'"genre":\s*"(.*?)"', gemini_output, re.DOTALL).group(1) if re.search(
+                r'"genre":\s*"(.*?)"', gemini_output, re.DOTALL) else ""
+            extracted_data["language"] = re.search(r'"language":\s*"(.*?)"', gemini_output, re.DOTALL).group(
+                1) if re.search(r'"language":\s*"(.*?)"', gemini_output, re.DOTALL) else ""
+            extracted_data["review"] = re.search(r'"review":\s*"(.*?)"', gemini_output, re.DOTALL).group(
+                1) if re.search(r'"review":\s*"(.*?)"', gemini_output, re.DOTALL) else ""
+            flash('A análise da capa retornou um formato inesperado. Alguns campos podem estar incompletos.', 'warning')
+
+        current_app.logger.info(f"Dados extraídos do Gemini: {extracted_data}")
+        return jsonify(extracted_data)
+
+    except Exception as e:
+        current_app.logger.error(f"Erro inesperado ao chamar a API do Gemini: {e}", exc_info=True)
+        return jsonify({"error": f"Erro ao processar a imagem com o Gemini: {e}"}), 500
+
+
+@app.route('/book/<book_id>')
+def book_detail_route(book_id):
+    """Exibe os detalhes de um livro específico."""
+    book = db.session.get(Book, book_id)
+    if book:
+        return render_template('book_detail.html', book=book)
+    flash('Livro não encontrado.', 'error')
+    return redirect(url_for('index'))
+
+
+@app.route('/edit/<book_id>', methods=['GET', 'POST'])
+def edit_book(book_id):
+    book = db.session.get(Book, book_id)
+    if not book:
+        flash('Livro não encontrado.', 'error')
+        return redirect(url_for('index'))
+
+    if request.method == 'POST':
+        book.title = request.form.get('title', book.title)
+        book.author = request.form.get('author', book.author)
+        book.genre = request.form.get('genre', book.genre)
+        book.language = request.form.get('language', book.language)
+        book.shelf = request.form.get('shelf', book.shelf)
+        book.bookshelf = request.form.get('bookshelf', book.bookshelf)
+        book.review = request.form.get('review', book.review)
+
+        cover_option = request.form.get('cover_option')
+        new_cover_path_candidate = None  # Caminho candidato para a nova capa
+
+        if cover_option == 'file':
+            cover_image_file = request.files.get('cover_file')
+            if cover_image_file and cover_image_file.filename != '':
+                temp_path = save_image_from_file(cover_image_file)
+                if temp_path:
+                    new_cover_path_candidate = temp_path
+                else:
+                    flash('Erro ao carregar nova capa do arquivo. Capa antiga mantida.', 'error')
+        elif cover_option == 'camera':
+            cover_image_data = request.form.get('cover_image_data')
+            if cover_image_data:
+                temp_path = save_image_from_base64(cover_image_data)
+                if temp_path:
+                    new_cover_path_candidate = temp_path
+                else:
+                    flash('Erro ao salvar nova capa da câmera. Capa antiga mantida.', 'error')
+        elif cover_option == 'url':
+            final_cover_url = request.form.get('final_cover_url')
+            if final_cover_url:
+                temp_path = save_image_from_url(final_cover_url)
+                if temp_path:
+                    new_cover_path_candidate = temp_path
+                else:
+                    flash('Erro ao carregar nova capa da URL. Capa antiga mantida.', 'error')
+        # Se cover_option == 'current', new_cover_path_candidate permanece None,
+        # e a capa não será alterada abaixo.
+
+        # Atualiza a capa somente se uma nova foi processada com sucesso
+        if new_cover_path_candidate:
+            delete_existing_cover(book.cover_path)  # Deleta a antiga ANTES de atribuir a nova
+            book.cover_path = new_cover_path_candidate
+        # Se cover_option == 'current', nenhuma alteração em book.cover_path ocorre.
+
+        try:
+            db.session.commit()
+            flash('Livro atualizado com sucesso!', 'success')
+            check_and_perform_backup()
+            return redirect(url_for('book_detail_route', book_id=book.id))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Erro ao atualizar livro: {e}', 'error')
+            logging.error(f"Erro ao atualizar livro '{book.id}': {e}", exc_info=True)
+            # Passar book_id para o template é redundante se book já é passado
+            return render_template('edit_book.html', book=book)
+
+    return render_template('edit_book.html', book=book)
+
+
+@app.route('/delete/<book_id>', methods=['POST'])
 def delete_book(book_id):
-    """Deleta um livro e sua capa associada."""
-    book = Livro.query.get_or_404(book_id)
-    if request.method == 'POST':
-        # Deleta a imagem da capa antes de deletar o registro do livro
-        delete_local_cover_file(book.capa)
-        db.session.delete(book)
-        db.session.commit()
-        flash('Livro deletado com sucesso!', 'success')
+    """Exclui um livro."""
+    book_to_delete = db.session.get(Book, book_id)
+
+    if not book_to_delete:
+        flash('Livro não encontrado para exclusão.', 'error')
         return redirect(url_for('index'))
-    return render_template('confirm_delete.html', book=book)
 
+    # Remove o arquivo da capa do livro, se existir
+    delete_existing_cover(book_to_delete.cover_path)
 
-@app.route('/bulk_upload', methods=['GET', 'POST'])
-def bulk_upload():
-    """Permite o upload em massa de livros, com preenchimento via Gemini."""
-    if request.method == 'POST':
-        books_to_add = []
-
-        # Itera sobre os campos do formulário para encontrar entradas de livro
-        for key, value in request.form.items():
-            if key.startswith('titulo_'):
-                index = key.split('_')[1]
-                titulo = value
-                autor = request.form.get(f'autor_{index}')
-                genero = request.form.get(f'genero_{index}')
-                idioma = request.form.get(f'idioma_{index}')
-                resenha = request.form.get(f'resenha_{index}')
-                estante = request.form.get(f'estante_{index}')
-                prateleira = request.form.get(f'prateleira_{index}')
-                capa_path = None
-
-                cover_option_key = f'cover_option_{index}'
-                cover_option = request.form.get(cover_option_key)
-
-                if cover_option == 'file':
-                    capa_file_key = f'capa_file_{index}'
-                    if capa_file_key in request.files and request.files[capa_file_key].filename:
-                        file = request.files[capa_file_key]
-                        if allowed_file(file.filename):
-                            filename = secure_filename(file.filename)
-                            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-                            capa_path = filename  # Armazena nome do arquivo
-                elif cover_option == 'url':
-                    capa_url_key = f'capa_url_{index}'
-                    if request.form.get(capa_url_key):
-                        capa_path = request.form.get(capa_url_key)
-                elif cover_option == 'camera':
-                    capa_camera_data_key = f'capa_camera_data_{index}'
-                    if request.form.get(capa_camera_data_key):
-                        data_url = request.form.get(capa_camera_data_key)
-                        if data_url.startswith('data:image'):
-                            header, encoded = data_url.split(",", 1)
-                            data = base64.b64decode(encoded)
-                            filename = secure_filename(
-                                f"camera_upload_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{index}.png")
-                            file_save_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                            with open(file_save_path, "wb") as fh:
-                                fh.write(data)
-                            capa_path = filename  # Armazena nome do arquivo
-
-                books_to_add.append(Livro(
-                    titulo=titulo,
-                    autor=autor,
-                    genero=genero,
-                    idioma=idioma,
-                    resenha=resenha,
-                    capa=capa_path,
-                    estante=estante,
-                    prateleira=prateleira
-                ))
-
-        db.session.add_all(books_to_add)
+    db.session.delete(book_to_delete)
+    try:
         db.session.commit()
-        flash('Livros adicionados em massa com sucesso!', 'success')
-        return redirect(url_for('index'))
-    return render_template('bulk_upload.html')
+        check_and_perform_backup()
+        flash('Livro excluído com sucesso!', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Erro ao excluir livro: {e}', 'error')
+        logging.error(f"Erro ao excluir livro '{book_id}': {e}", exc_info=True)
+
+    return redirect(url_for('index'))
 
 
-@app.route('/process_camera_image', methods=['POST'])
-def process_camera_image():
-    """Processa a imagem da câmera com a API Gemini para extrair informações do livro."""
-    app.logger.info("Iniciando processamento de imagem da câmera para Gemini.")
+# ... (resto do seu código app.py) ...
 
-    if 'image' not in request.files:
-        app.logger.warning("Nenhuma imagem fornecida na requisição /process_camera_image.")
-        return jsonify({'error': 'Nenhuma imagem fornecida'}), 400
+@app.route('/add_shelf_with_books', methods=['GET', 'POST'])
+def add_shelf_with_books():
+    if request.method == 'POST':
+        bookshelf_name = request.form.get('bookshelf_name', '').strip()
+        shelf_name = request.form.get('shelf_name', '').strip()
 
-    file = request.files['image']
-    if not file or not file.filename:
-        app.logger.warning("Nenhum arquivo selecionado ou nome de arquivo vazio em /process_camera_image.")
-        return jsonify({'error': 'Nenhum arquivo selecionado'}), 400
+        titles = request.form.getlist('titles[]')
+        authors = request.form.getlist('authors[]')
 
-    if allowed_file(file.filename):
-        filename = secure_filename(f"temp_camera_upload_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.png")
-        temp_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        if not bookshelf_name or not shelf_name:
+            flash('Nome da Estante e da Prateleira são obrigatórios.', 'error')
+            # Re-renderiza o formulário com os dados já inseridos para os livros
+            # Isso é um pouco mais complexo de fazer perfeitamente sem JS avançado no lado do cliente
+            # para reconstruir as linhas, então vamos simplificar por agora.
+            # O ideal seria passar 'titles' e 'authors' de volta para o template.
+            return render_template('add_shelf_with_books.html',
+                                   bookshelf_name=bookshelf_name,
+                                   shelf_name=shelf_name)
 
-        try:
-            file.save(temp_path)
-            app.logger.info(f"Imagem temporária salva em: {temp_path}")
+        books_added_count = 0
+        for i in range(len(titles)):
+            title = titles[i].strip()
+            author = authors[i].strip()
 
-            model = genai.GenerativeModel('gemini-pro-vision')
-            app.logger.info("Modelo Gemini inicializado.")
+            if title and author:  # Só adiciona se título e autor não estiverem em branco
+                new_book = Book(
+                    title=title,
+                    author=author,
+                    bookshelf=bookshelf_name,
+                    shelf=shelf_name
+                    # Outros campos como genre, language, review, cover_path serão None/default
+                )
+                db.session.add(new_book)
+                books_added_count += 1
 
-            with open(temp_path, 'rb') as f:
-                image_data = f.read()
-
-            prompt = "Extraia as seguintes informações deste livro: Título, Autor, Gênero, Idioma, Resenha (um breve resumo se possível). Retorne em formato JSON."
-
-            app.logger.info("Enviando imagem para a API Gemini...")
-            # Adicionado um timeout para a requisição Gemini para evitar hangs
-            # O timeout abaixo é para a biblioteca do Gemini, não para a requisição HTTP do Flask.
-            # Se o problema for de rede entre Flask e Gemini, este timeout pode ajudar a identificar.
-            response = model.generate_content([prompt, {'mime_type': 'image/jpeg', 'data': image_data}],
-                                              request_options={"timeout": 60})  # 60 segundos de timeout
-
-            app.logger.info(
-                f"Resposta da API Gemini recebida. Conteúdo: {response.text[:200]}...")  # Log dos primeiros 200 caracteres
-
+        if books_added_count > 0:
             try:
-                extracted_data = json.loads(response.text.strip())
-                app.logger.info("Resposta Gemini parseada como JSON com sucesso.")
-            except json.JSONDecodeError:
-                # Se não for JSON, tenta usar a resposta bruta na resenha
-                extracted_data = {"resenha": response.text.strip()}
-                app.logger.warning("Resposta Gemini não é JSON válido. Usando texto bruto para resenha.")
-
-            os.remove(temp_path)
-            app.logger.info(f"Imagem temporária {temp_path} removida.")
-            return jsonify({'success': True, 'data': extracted_data, 'temp_image_path': filename})
-
-        except Exception as e:
-            app.logger.error(f"Erro ao processar imagem com Gemini: {e}",
-                             exc_info=True)  # exc_info=True para traceback completo
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-                app.logger.info(f"Imagem temporária {temp_path} removida após erro.")
-            return jsonify({'error': f'Erro ao processar imagem com Gemini: {str(e)}'}), 500
-
-    app.logger.warning(f"Arquivo '{file.filename}' não permitido em /process_camera_image.")
-    return jsonify({'error': 'Tipo de arquivo não permitido'}), 400
-
-
-@app.route('/process_shelf_image', methods=['POST'])
-def process_shelf_image():
-    """Processa a imagem da estante com a API Gemini para extrair informações de múltiplos livros."""
-    app.logger.info("Iniciando processamento de imagem da estante para Gemini.")
-
-    if 'image' not in request.files:
-        app.logger.warning("Nenhuma imagem fornecida na requisição /process_shelf_image.")
-        return jsonify({'error': 'Nenhuma imagem fornecida'}), 400
-
-    file = request.files['image']
-    if not file or not file.filename:
-        app.logger.warning("Nenhum arquivo selecionado ou nome de arquivo vazio em /process_shelf_image.")
-        return jsonify({'error': 'Nenhum arquivo selecionado'}), 400
-
-    if allowed_file(file.filename):
-        filename = secure_filename(f"temp_shelf_upload_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.png")
-        temp_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-
-        try:
-            file.save(temp_path)
-            app.logger.info(f"Imagem temporária da estante salva em: {temp_path}")
-
-            model = genai.GenerativeModel('gemini-pro-vision')
-            app.logger.info("Modelo Gemini inicializado para estante.")
-
-            with open(temp_path, 'rb') as f:
-                image_data = f.read()
-
-            prompt = "Dada a imagem de uma estante de livros, liste os livros detectados. Para cada livro, tente identificar Título, Autor, Gênero e Idioma. Formate a saída como um array de objetos JSON, onde cada objeto representa um livro e possui as chaves 'titulo', 'autor', 'genero' e 'idioma'. Se não puder identificar um campo, deixe-o como null."
-
-            app.logger.info("Enviando imagem da estante para a API Gemini...")
-            response = model.generate_content([prompt, {'mime_type': 'image/jpeg', 'data': image_data}],
-                                              request_options={"timeout": 90})  # Aumentei timeout para estante
-
-            app.logger.info(f"Resposta da API Gemini para estante recebida. Conteúdo: {response.text[:200]}...")
-
-            try:
-                extracted_books_data = json.loads(response.text.strip())
-                app.logger.info("Resposta Gemini para estante parseada como JSON com sucesso.")
-            except json.JSONDecodeError:
-                extracted_books_data = []  # Retorna vazio se não for JSON
+                db.session.commit()
                 flash(
-                    'Não foi possível extrair dados em formato JSON da imagem da estante. Tente novamente ou insira manualmente.',
-                    'warning')
-                app.logger.warning("Resposta Gemini para estante não é JSON válido.")
+                    f'{books_added_count} livro(s) adicionado(s) à estante "{bookshelf_name}", prateleira "{shelf_name}" com sucesso!',
+                    'success')
+                check_and_perform_backup()  # Verifica backup após o lote de alterações
+            except Exception as e:
+                db.session.rollback()
+                flash(f'Erro ao salvar livros: {e}', 'error')
+                logging.error(f"Erro ao salvar lote de livros: {e}", exc_info=True)
+        else:
+            flash('Nenhum livro válido (com título e autor) foi fornecido para adicionar.', 'warning')
 
-            os.remove(temp_path)
-            app.logger.info(f"Imagem temporária da estante {temp_path} removida.")
-            return jsonify({'success': True, 'books': extracted_books_data})
+        return redirect(url_for('index'))
 
-        except Exception as e:
-            app.logger.error(f"Erro ao processar imagem da estante com Gemini: {e}", exc_info=True)
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-                app.logger.info(f"Imagem temporária da estante {temp_path} removida após erro.")
-            return jsonify({'error': f'Erro ao processar imagem da estante com Gemini: {str(e)}'}), 500
-
-    app.logger.warning(f"Arquivo '{file.filename}' não permitido em /process_shelf_image.")
-    return jsonify({'error': 'Tipo de arquivo não permitido'}), 400
+    return render_template('add_shelf_with_books.html')
 
 
-# --- Inicialização da Aplicação ---
+@app.route('/analyze_shelf_via_gemini', methods=['POST'])
+def analyze_shelf_via_gemini():
+    """
+    Endpoint para receber uma imagem (da câmera), enviá-la ao Gemini,
+    e retornar informações extraídas do livro.
+    """
+    if not model:
+        current_app.logger.warning(
+            "Serviço Gemini não está disponível devido à falta de API Key ou erro de inicialização.")
+        return jsonify({"error": "Serviço de análise de capa indisponível."}), 503
 
+    if 'shelf_image_data' not in request.files:
+        current_app.logger.error("Nenhuma imagem recebida em /analyze_cover_via_gemini")
+        return jsonify({"error": "Nenhuma imagem recebida."}), 400
+
+    image_file = request.files['shelf_image_data']
+    current_app.logger.info(f"Recebida imagem para análise: {image_file.filename}")
+
+    try:
+        image_bytes = image_file.read()
+        # Tenta inferir o tipo MIME real do arquivo, fallback para JPEG
+        mime_type = image_file.mimetype if image_file.mimetype else "image/jpeg"
+
+        image_part = {"mime_type": mime_type, "data": image_bytes}
+
+        prompt = '''
+            A partir da imagem fornecida, conte quantas lombadas de livros existem
+            na imagem, obtenha de cada lombada o título e o autor, e faça uma lista com título e autor de cada livro.
+            Deduza qual é o idioma pelo título do livro.
+            
+            
+            Busque na internet informações de cada livro com base na lista de título e autor, 
+            e obtenha o gênero e uma breve resenha de cada livro. 
+            Adicione após a resenha numa linha abaixo:  Resenha gerada por IA.
+            
+            Retorne os dados estritamente no formato JSON, sem texto adicional antes ou depois do JSON.
+            
+            Com exceção do título e do autor, escreva em portuguÊs.
+    
+            Exemplo de formato esperado:
+            ```json
+            [{
+                "title": "Título do Livro",
+                "author": "Nome do Autor",
+                "genre": "Gênero do Livro (Ex: Ficção Científica, Romance, Fantasia)",
+                "language": "Idioma do Livro (Ex: Português, Inglês)",
+                "review": "Uma breve resenha do livro, contendo um resumo e principais temas."
+            }]
+            ```
+            '''
+
+        # Solicita explicitamente uma resposta JSON para o Gemini
+        response = model.generate_content(
+            [prompt, image_part],
+            stream=False,
+            generation_config={"response_mime_type": "application/json"}
+        )
+
+        # ... (previous code in analyze_shelf_via_gemini) ...
+
+        gemini_output = response.text
+        logging.debug(f"Resposta Gemini (análise de prateleira) crua: {gemini_output}")
+        # The print(response.text) you added is helpful for debugging, you can keep or remove it.
+        # print(response.text) # This line was in your provided app.py
+
+        # MODIFICATION STARTS HERE
+        try:
+            # Gemini is expected to return a list of book objects
+            list_of_books_from_gemini = json.loads(gemini_output)
+
+            if not isinstance(list_of_books_from_gemini, list):
+                logging.error(f"Resposta do Gemini para prateleira não é uma lista JSON: {gemini_output}")
+                # Attempt a fallback if it's a dictionary containing a "books" key
+                if isinstance(list_of_books_from_gemini, dict) and \
+                        "books" in list_of_books_from_gemini and \
+                        isinstance(list_of_books_from_gemini.get("books"), list):
+                    list_of_books_from_gemini = list_of_books_from_gemini["books"]
+                    logging.info("Fallback: Usada a chave 'books' da resposta do Gemini.")
+                else:
+                    flash('A análise da prateleira retornou um formato inesperado (não é uma lista de livros).',
+                          'warning')
+                    return jsonify([]), 200
+
+            processed_books_for_frontend = []
+            for book_data_from_gemini in list_of_books_from_gemini:
+                if isinstance(book_data_from_gemini, dict):
+                    # Ensure all expected keys are present for the frontend
+                    processed_book = {
+                        "title": book_data_from_gemini.get("title", ""),
+                        "author": book_data_from_gemini.get("author", ""),
+                        "genre": book_data_from_gemini.get("genre", ""),
+                        "language": book_data_from_gemini.get("language", ""),
+                        "review": book_data_from_gemini.get("review", "")
+                    }
+                    # Add to list if title and author are present
+                    if processed_book["title"] and processed_book["author"]:
+                        processed_books_for_frontend.append(processed_book)
+                    else:
+                        logging.warning(
+                            f"Livro do Gemini descartado por falta de título/autor: {book_data_from_gemini}")
+                else:
+                    logging.warning(
+                        f"Item inesperado na lista do Gemini (não é um dicionário de livro): {book_data_from_gemini}")
+
+            if not processed_books_for_frontend and list_of_books_from_gemini:
+                logging.info(
+                    f"Nenhum livro válido (com título/autor) encontrado na lista processada do Gemini: {list_of_books_from_gemini}")
+
+            current_app.logger.info(f"Livros processados para enviar ao frontend: {processed_books_for_frontend}")
+            return jsonify(processed_books_for_frontend)
+
+        except json.JSONDecodeError as e:
+            logging.error(f"Resposta do Gemini para prateleira não é um JSON válido: {e}. Resposta: {gemini_output}",
+                          exc_info=True)
+            flash('A análise da prateleira retornou um formato que não pôde ser processado (JSON inválido).', 'error')
+            return jsonify([]), 500
+        except Exception as e_gen:  # Catch other general exceptions during response processing
+            logging.error(f"Erro ao processar resposta do Gemini para prateleira: {e_gen}. Resposta: {gemini_output}",
+                          exc_info=True)
+            flash('Ocorreu um erro ao processar os dados da prateleira.', 'error')
+            return jsonify([]), 500
+        # MODIFICATION ENDS HERE
+
+    except Exception as e:  # Catches errors in the Gemini call or image reading
+        current_app.logger.error(f"Erro inesperado ao analisar prateleira com Gemini: {e}", exc_info=True)
+        return jsonify({"error": f"Erro ao processar a imagem da prateleira: {str(e)}"}), 500
+
+
+# --- Execução da Aplicação ---
+# ... (resto do seu código)
+
+
+# --- Execução da Aplicação ---
 if __name__ == '__main__':
-    # Configura o logger para exibir mensagens no console (útil para depuração)
-    import logging
-
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
+    # Cria as tabelas do banco de dados se elas não existirem
     with app.app_context():
-        # Cria a pasta de uploads se ela não existir
-        if not os.path.exists(app.config['UPLOAD_FOLDER']):
-            os.makedirs(app.config['UPLOAD_FOLDER'])
-            app.logger.info(f"Diretório de uploads criado: {app.config['UPLOAD_FOLDER']}")
         db.create_all()
-        app.logger.info("Tabelas do banco de dados verificadas/criadas.")
+        logging.info("Tabelas do banco de dados verificadas/criadas.")
+        backup_database()  # <<------------------------------------ ADICIONADO
+        app.config['DB_CHANGES_COUNT'] = 0  # <<----------------- ADICIONADO: Reseta contador
 
-    # Imprime o MAX_CONTENT_LENGTH configurado (para depuração)
-    app.logger.info(f"MAX_CONTENT_LENGTH configurado: {app.config.get('MAX_CONTENT_LENGTH')} bytes")
+    ssl_cert_path = BASE_DIR / "ssl" / "cert.pem"  # <<------------- MODIFICADO: Usando Pathlib
+    ssl_key_path = BASE_DIR / "ssl" / "key.pem"  # <<------------- MODIFICADO: Usando Pathlib
 
-    # Inicia o servidor Flask
-    # Removi o ssl_context por padrão para evitar problemas de certificado em dev
-    # Se precisar de HTTPS em desenvolvimento, configure adequadamente (mkcert, adhoc, etc.)
-    app.run(debug=True, host='0.0.0.0', port=5000)  # Use a porta 5000 explicitamente
+    app.run(debug=True, host='0.0.0.0', port=5000, ssl_context=(ssl_cert_path, ssl_key_path))
+    # app.run(debug=True, host='0.0.0.0', port=5000)
